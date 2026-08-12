@@ -8,7 +8,12 @@ export type QuestId =
   | 'clear_fields_1'
   | 'post_defense'
   | 'upgrade_barracks'
-  | 'win_pvp';
+  | 'win_pvp'
+  | 'craft_armor'
+  | 'clear_fields_2'
+  | 'recruit_two'
+  | 'win_live'
+  | 'reach_rating';
 
 export type QuestDef = {
   id: QuestId;
@@ -58,8 +63,17 @@ export const QUEST_CHAIN: QuestDef[] = [
     rewardSparks: 1,
   },
   {
-    id: 'upgrade_barracks',
+    id: 'craft_armor',
     order: 5,
+    labelKey: 'questCraftArmor',
+    detailKey: 'questCraftArmorDetail',
+    tab: 'forge',
+    rewardGold: 30,
+    rewardSparks: 1,
+  },
+  {
+    id: 'upgrade_barracks',
+    order: 6,
     labelKey: 'questUpgradeBarracks',
     detailKey: 'questUpgradeBarracksDetail',
     tab: 'barracks',
@@ -67,13 +81,49 @@ export const QUEST_CHAIN: QuestDef[] = [
     rewardSparks: 2,
   },
   {
+    id: 'recruit_two',
+    order: 7,
+    labelKey: 'questRecruitTwo',
+    detailKey: 'questRecruitTwoDetail',
+    tab: 'barracks',
+    rewardGold: 40,
+    rewardSparks: 2,
+  },
+  {
     id: 'win_pvp',
-    order: 6,
+    order: 8,
     labelKey: 'questWinPvp',
     detailKey: 'questWinPvpDetail',
     tab: 'arena',
     rewardGold: 50,
     rewardSparks: 3,
+  },
+  {
+    id: 'clear_fields_2',
+    order: 9,
+    labelKey: 'questClearFields2',
+    detailKey: 'questClearFields2Detail',
+    tab: 'campaign',
+    rewardGold: 55,
+    rewardSparks: 2,
+  },
+  {
+    id: 'win_live',
+    order: 10,
+    labelKey: 'questWinLive',
+    detailKey: 'questWinLiveDetail',
+    tab: 'arena',
+    rewardGold: 60,
+    rewardSparks: 3,
+  },
+  {
+    id: 'reach_rating',
+    order: 11,
+    labelKey: 'questReachRating',
+    detailKey: 'questReachRatingDetail',
+    tab: 'arena',
+    rewardGold: 80,
+    rewardSparks: 4,
   },
 ];
 
@@ -110,10 +160,28 @@ export function isQuestObjectiveMet(state: any, id: QuestId): boolean {
       return !!state.campaign?.cleared?.fields_1;
     case 'post_defense':
       return !!state.flags?.pvpDefensePosted;
+    case 'craft_armor': {
+      const inv = state.inventory || [];
+      const armorSlots = new Set(['helm', 'body', 'legs']);
+      const hasArmorStash = inv.some((itemId: string) => armorSlots.has(state.items?.[itemId]?.slot));
+      const hasEquipped = (state.warriors || []).some((w: any) => {
+        const eq = w.equip || {};
+        return !!(eq.helm || eq.body || eq.legs);
+      });
+      return hasArmorStash || hasEquipped;
+    }
     case 'upgrade_barracks':
       return (state.barracksLevel || 1) > 1;
+    case 'recruit_two':
+      return (state.warriors?.length || 0) >= 2;
     case 'win_pvp':
       return (state.flags?.pvpWins || 0) > 0;
+    case 'clear_fields_2':
+      return !!state.campaign?.cleared?.fields_2;
+    case 'win_live':
+      return (state.flags?.liveWins || 0) > 0;
+    case 'reach_rating':
+      return (state.flags?.pvpRatingBest || 0) >= 1100;
     default:
       return false;
   }
@@ -189,6 +257,19 @@ export function markPvpDefensePosted(state: any) {
 export function markPvpWin(state: any) {
   if (!state.flags) state.flags = {};
   state.flags.pvpWins = (state.flags.pvpWins || 0) + 1;
+  syncQuestObjectives(state);
+}
+
+export function markLiveWin(state: any) {
+  if (!state.flags) state.flags = {};
+  state.flags.liveWins = (state.flags.liveWins || 0) + 1;
+  syncQuestObjectives(state);
+}
+
+export function markPvpRating(state: any, rating: number) {
+  if (!state.flags) state.flags = {};
+  const r = Math.round(Number(rating) || 0);
+  state.flags.pvpRatingBest = Math.max(state.flags.pvpRatingBest || 0, r);
   syncQuestObjectives(state);
 }
 

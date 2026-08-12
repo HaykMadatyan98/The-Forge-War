@@ -307,9 +307,12 @@ function pvpSummaryMeta(battle: any) {
 export function applyPvpVictory(state: any, battle: any) {
   const st = battle.stats || { kills: {}, damageDealt: {} };
   const players = battle.units.filter((u: any) => u.team === 'player' && u.source);
-  const enemyDown = battle.units.filter((u: any) => u.team === 'enemy' && u.hp <= 0).length;
-  const power = battle.pvp?.defenderPower || 50;
-  const atk = Math.max(1, battle.pvp?.attackerPower || power);
+  const enemyDown =
+    battle.kind === 'live'
+      ? battle.units.filter((u: any) => u.hp <= 0).length
+      : battle.units.filter((u: any) => u.team === 'enemy' && u.hp <= 0).length;
+  const power = battle.pvp?.defenderPower || battle.live?.powerB || 50;
+  const atk = Math.max(1, battle.pvp?.attackerPower || battle.live?.powerA || power);
   // Bigger underdog bonus; soft cap so farming weak boards stays modest
   const underdog = Math.min(1.85, Math.max(0.65, 0.55 + (power / atk) * 0.55));
   const botNerf = battle.pvp?.isBot ? 0.72 : 1;

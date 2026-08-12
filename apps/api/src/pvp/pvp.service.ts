@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { squadFromCloudSave } from './squadFromSave';
 import { BattleService } from '../battle/battle.service';
 import { logMetric } from '../metrics/metrics';
+import { applyElo, RATING_DEFAULT } from './rating';
 
 type PublicPlayer = {
   id: string;
@@ -66,6 +67,8 @@ export class PvpService {
       power: row.power,
       wins: row.wins,
       losses: row.losses,
+      rating: row.rating ?? RATING_DEFAULT,
+      ratingGames: row.ratingGames ?? 0,
       updatedAt: row.updatedAt.toISOString(),
     };
   }
@@ -119,6 +122,7 @@ export class PvpService {
           power: r.power,
           wins: r.wins,
           losses: r.losses,
+          rating: (r as any).rating ?? RATING_DEFAULT,
           warriorCount: warriors.length,
           rosterPreview,
           squad: {
@@ -139,10 +143,69 @@ export class PvpService {
         power: row.power,
         wins: row.wins,
         losses: row.losses,
+        rating: row.rating ?? RATING_DEFAULT,
+        ratingGames: row.ratingGames ?? 0,
         updatedAt: row.updatedAt.toISOString(),
         displayName: row.displayName,
         avatarKey: row.avatarKey,
       },
+    };
+  }
+
+  async ladder(limit = 20, selfId?: string) {
+    const take = Math.min(50, Math.max(5, limit));
+    const rows = await this.prisma.pvpDefense.findMany({
+      orderBy: [{ rating: 'desc' }, { wins: 'desc' }],
+      take,
+    });
+    let me: null | {
+      rank: number;
+      playerId: string;
+      displayName: string;
+      avatarKey: string | null;
+      rating: number;
+      wins: number;
+      losses: number;
+      power: number;
+    } = null;
+
+    if (selfId) {
+      const mine = await this.prisma.pvpDefense.findUnique({ where: { playerId: selfId } });
+      if (mine) {
+        const higher = await this.prisma.pvpDefense.count({
+          where: {
+            OR: [
+              { rating: { gt: mine.rating } },
+              { rating: mine.rating, wins: { gt: mine.wins } },
+            ],
+          },
+        });
+        me = {
+          rank: higher + 1,
+          playerId: mine.playerId,
+          displayName: mine.displayName || 'You',
+          avatarKey: mine.avatarKey,
+          rating: mine.rating ?? RATING_DEFAULT,
+          wins: mine.wins,
+          losses: mine.losses,
+          power: mine.power,
+        };
+      }
+    }
+
+    return {
+      ladder: rows.map((r, i) => ({
+        rank: i + 1,
+        playerId: r.playerId,
+        displayName: r.displayName || 'Player',
+        avatarKey: r.avatarKey,
+        rating: r.rating ?? RATING_DEFAULT,
+        wins: r.wins,
+        losses: r.losses,
+        power: r.power,
+        ratingGames: r.ratingGames ?? 0,
+      })),
+      me,
     };
   }
 
@@ -306,20 +369,48 @@ export class PvpService {
     });
 
     const opp = await this.prisma.pvpDefense.findUnique({ where: { playerId: match.defenderId } });
-    if (opp) {
+    const atk = await this.prisma.pvpDefense.findUnique({ where: { playerId: attackerId } });
+
+    if (opp && atk) {
+      const next = applyElo(atk.rating ?? RATING_DEFAULT, opp.rating ?? RATING_DEFAULT, acceptedVictory ? 1 : 0);
       await this.prisma.pvpDefense.update({
         where: { playerId: match.defenderId },
-        data: acceptedVictory ? { losses: { increment: 1 } } : { wins: { increment: 1 } },
+        data: {
+          rating: next.b,
+          ratingGames: { increment: 1 },
+          ...(acceptedVictory ? { losses: { increment: 1 } } : { wins: { increment: 1 } }),
+        },
       });
+      await this.prisma.pvpDefense.update({
+        where: { playerId: attackerId },
+        data: {
+          rating: next.a,
+          ratingGames: { increment: 1 },
+          ...(acceptedVictory ? { wins: { increment: 1 } } : { losses: { increment: 1 } }),
+        },
+      });
+    } else {
+      if (opp) {
+        await this.prisma.pvpDefense.update({
+          where: { playerId: match.defenderId },
+          data: acceptedVictory ? { losses: { increment: 1 } } : { wins: { increment: 1 } },
+        });
+      }
+      await this.prisma.pvpDefense
+        .updateMany({
+          where: { playerId: attackerId },
+          data: acceptedVictory ? { wins: { increment: 1 } } : { losses: { increment: 1 } },
+        })
+        .catch(() => {});
     }
 
-    await this.prisma.pvpDefense
-      .updateMany({
-        where: { playerId: attackerId },
-        data: acceptedVictory ? { wins: { increment: 1 } } : { losses: { increment: 1 } },
-      })
-      .catch(() => {});
-
-    return { ok: true, matchId: match.id, victory: acceptedVictory };
+    return {
+      ok: true,
+      matchId: match.id,
+      victory: acceptedVictory,
+      rating: atk
+        ? applyElo(atk.rating ?? RATING_DEFAULT, opp?.rating ?? RATING_DEFAULT, acceptedVictory ? 1 : 0)
+        : null,
+    };
   }
 }

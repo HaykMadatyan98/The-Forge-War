@@ -26,6 +26,7 @@ import { IconWeapon, Portrait } from './icons';
 import { warriorImageSrc } from './artCatalog';
 import { getArtImage } from './artCache';
 import { BattleWorld } from './battle3d/BattleWorld';
+import { connectRealtime } from '@/lib/realtime';
 
 /** Visual layer for combatants */
 type Vis = {
@@ -120,8 +121,13 @@ export function MissionScreen({
   onDefeat: (battle: any) => void;
 }) {
   const cap = deployCap(state);
+  const isLiveDuel = !!(deploy?.isLive && deploy?.liveMode === 'duel' && deploy?.liveMatchId);
+  const youAre: 'A' | 'B' = deploy?.youAre === 'B' ? 'B' : 'A';
+  const myTeam = youAre === 'B' ? 'enemy' : 'player';
   const [phase, setPhase] = useState<'deploy' | 'play'>('deploy');
   const [placingId, setPlacingId] = useState<string | null>(deploy.selected[0] || null);
+  const [waitingOpponent, setWaitingOpponent] = useState(false);
+  const liveDoneRef = useRef(false);
 
   const [battle, setBattle] = useState<any>(() => snapshotForDeploy(state, deploy, 'deploy'));
 
@@ -159,6 +165,10 @@ export function MissionScreen({
   placingRef.current = placingId;
   const hoverRef = useRef(hover);
   hoverRef.current = hover;
+  const myTeamRef = useRef(myTeam);
+  myTeamRef.current = myTeam;
+  const youAreRef = useRef(youAre);
+  youAreRef.current = youAre;
 
   function ensureVis(u: any): Vis {
     let v = visRef.current[u.id];
@@ -277,12 +287,18 @@ export function MissionScreen({
           const h = hoverRef.current;
           const act = getActive(b);
           const isActivePlayer =
-            ph === 'play' && act && act.id === u.id && act.team === 'player' && u.hp > 0;
+            ph === 'play' && act && act.id === u.id && act.team === myTeamRef.current && u.hp > 0;
           const isPlacer = ph === 'deploy' && placingRef.current === u.id && u.hp > 0;
           if (h && (isActivePlayer || isPlacer)) {
             v.face = faceToward(v.x, v.y, h.x, h.y, v.face);
-          } else if (ph === 'play' && u.team === 'enemy' && u.hp > 0 && act && act.team === 'player') {
-            // Enemies glance toward the current player unit when idle
+          } else if (
+            ph === 'play' &&
+            u.team !== myTeamRef.current &&
+            u.hp > 0 &&
+            act &&
+            act.team === myTeamRef.current
+          ) {
+            // Opponents glance toward the current player unit when idle
             const av = visRef.current[act.id];
             v.face = faceToward(v.x, v.y, av?.x ?? act.x, av?.y ?? act.y, v.face);
           }
@@ -302,12 +318,12 @@ export function MissionScreen({
         .filter((f) => f.life > 0);
 
       const act = getActive(b);
-      const isHumanTurn = ph === 'play' && !!(act && act.team === 'player' && !act.acted);
+      const isHumanTurn = ph === 'play' && !!(act && act.team === myTeamRef.current && !act.acted);
 
-      // Visibility union from every living player (cleaner fog)
+      // Visibility union from every living ally
       let visTiles: Set<string> | null = null;
       if (ph === 'play') {
-        const scouts = b.units.filter((u: any) => u.team === 'player' && u.hp > 0);
+        const scouts = b.units.filter((u: any) => u.team === myTeamRef.current && u.hp > 0);
         visTiles = new Set<string>();
         for (const s of scouts) {
           for (const k of visibilityFor(s, b.map, b.units) as Set<string> | string[]) {
@@ -367,10 +383,10 @@ export function MissionScreen({
     };
   }, [battle, phase]);
 
-  // AI only in play
+  // AI only in play (not live duel — opponent is human)
   useEffect(() => {
     clearTimeout(aiTimer.current);
-    if (phase !== 'play' || !battle) return;
+    if (phase !== 'play' || !battle || isLiveDuel) return;
     const act = getActive(battle);
     if (!act || battle.mode !== 'play') return;
     if (act.team === 'enemy') {
@@ -407,10 +423,75 @@ export function MissionScreen({
       }, 480);
     }
     return () => clearTimeout(aiTimer.current);
-  }, [battle, phase, onVictory, onDefeat]);
+  }, [battle, phase, onVictory, onDefeat, isLiveDuel]);
+
+  function resolveLiveOutcome(b: any) {
+    if (!b || liveDoneRef.current) return;
+    if (b.mode !== 'victory' && b.mode !== 'defeat') return;
+    liveDoneRef.current = true;
+    const iWon = youAreRef.current === 'A' ? b.mode === 'victory' : b.mode === 'defeat';
+    if (iWon) onVictory(b);
+    else onDefeat(b);
+  }
+
+  useEffect(() => {
+    if (!isLiveDuel) return;
+    const sock = connectRealtime();
+    const matchId = deploy.liveMatchId as string;
+
+    const onStart = (ev: { matchId?: string; battle?: any }) => {
+      if (ev.matchId !== matchId || !ev.battle) return;
+      setWaitingOpponent(false);
+      setBattle(ev.battle);
+      setPhase('play');
+    };
+    const onState = (ev: { matchId?: string; battle?: any }) => {
+      if (ev.matchId !== matchId || !ev.battle) return;
+      setBattle(ev.battle);
+      resolveLiveOutcome(ev.battle);
+    };
+    const onFinished = (ev: { matchId?: string }) => {
+      if (ev.matchId !== matchId) return;
+      resolveLiveOutcome(battleRef.current);
+    };
+    const onDeployReady = (ev: { matchId?: string }) => {
+      if (ev.matchId !== matchId) return;
+      // Opponent locked deploy — keep waiting until battle_start
+      setWaitingOpponent(true);
+    };
+
+    sock.on('live:battle_start', onStart);
+    sock.on('live:state', onState);
+    sock.on('live:finished', onFinished);
+    sock.on('live:deploy_ready', onDeployReady);
+    return () => {
+      sock.off('live:battle_start', onStart);
+      sock.off('live:state', onState);
+      sock.off('live:finished', onFinished);
+      sock.off('live:deploy_ready', onDeployReady);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLiveDuel, deploy?.liveMatchId]);
+
+  function emitLiveAction(action: {
+    type: string;
+    unitId?: string;
+    x?: number;
+    y?: number;
+    targetId?: string;
+  }) {
+    if (!isLiveDuel || !deploy?.liveMatchId) return;
+    connectRealtime().emit('live:turn', { matchId: deploy.liveMatchId, action }, (res: any) => {
+      if (res?.error) setPreview(String(res.error));
+    });
+  }
 
   function afterPlayer() {
     setBattle({ ...battle });
+    if (isLiveDuel) {
+      resolveLiveOutcome(battle);
+      return;
+    }
     if (battle.mode === 'victory') onVictory(battle);
     else if (battle.mode === 'defeat') onDefeat(battle);
   }
@@ -430,7 +511,7 @@ export function MissionScreen({
   }
 
   const active = battle ? getActive(battle) : null;
-  const humanActive = phase === 'play' && active && active.team === 'player';
+  const humanActive = phase === 'play' && active && active.team === myTeam;
   const foeOf = (act: any) => (act?.team === 'player' ? 'enemy' : 'player');
 
   function onCanvasMove(e: React.MouseEvent) {
@@ -448,7 +529,7 @@ export function MissionScreen({
       return;
     }
     const act = getActive(battle);
-    if (!tile || !act || act.team !== 'player') {
+    if (!tile || !act || act.team !== myTeam) {
       setPreview(tileDesc);
       return;
     }
@@ -462,7 +543,7 @@ export function MissionScreen({
   }
 
   function onCanvasClick(e: React.MouseEvent) {
-    if (!battle) return;
+    if (!battle || waitingOpponent) return;
     const tile = worldRef.current?.pickTile(e);
     if (!tile) return;
 
@@ -491,10 +572,14 @@ export function MissionScreen({
 
     if (battle.mode !== 'play') return;
     const act = getActive(battle);
-    if (!act || act.team !== 'player') return;
+    if (!act || act.team !== myTeam) return;
     if (act.acted) return;
     const target = battle.units.find((u: any) => u.x === tile.x && u.y === tile.y && u.hp > 0);
     if (target && target.team === foeOf(act)) {
+      if (isLiveDuel) {
+        emitLiveAction({ type: 'attack', unitId: act.id, targetId: target.id });
+        return;
+      }
       const hpBefore = target.hp;
       const res = tryAttack(battle, act, target);
       spawnAttackFx(act, target, act.weaponType);
@@ -517,11 +602,16 @@ export function MissionScreen({
       } else setBattle({ ...battle });
       return;
     }
-    if (!target && tryMove(battle, act, tile.x, tile.y)) {
-      const v = ensureVis(act);
-      // Face toward destination tile (tryMove already wrote new x,y onto act)
-      v.face = faceToward(v.x, v.y, tile.x, tile.y, v.face);
-      setBattle({ ...battle });
+    if (!target) {
+      if (isLiveDuel) {
+        emitLiveAction({ type: 'move', unitId: act.id, x: tile.x, y: tile.y });
+        return;
+      }
+      if (tryMove(battle, act, tile.x, tile.y)) {
+        const v = ensureVis(act);
+        v.face = faceToward(v.x, v.y, tile.x, tile.y, v.face);
+        setBattle({ ...battle });
+      }
     }
   }
 
@@ -552,6 +642,29 @@ export function MissionScreen({
 
   function startFight() {
     if (!deploy.selected.length) return;
+    if (isLiveDuel) {
+      const positions = deploy.selected.map(
+        (id: string, i: number) => deploy.positions[id] || { x: 1, y: Math.min(9, 1 + i) },
+      );
+      setWaitingOpponent(true);
+      connectRealtime().emit(
+        'live:deploy',
+        {
+          matchId: deploy.liveMatchId,
+          warriorIds: deploy.selected,
+          positions,
+        },
+        (res: any) => {
+          if (res?.error) {
+            setWaitingOpponent(false);
+            setPreview(String(res.error));
+          } else if (res?.started) {
+            // battle_start event will sync board
+          }
+        },
+      );
+      return;
+    }
     // Prefer updating current units in place so 3D figures animate without full rebuild
     if (battle && battle.units?.length) {
       for (const id of deploy.selected) {
@@ -628,10 +741,14 @@ export function MissionScreen({
               <button
                 type="button"
                 className="primary"
-                disabled={!deploy.selected.length}
+                disabled={!deploy.selected.length || waitingOpponent}
                 onClick={startFight}
               >
-                {t('fight')} ({deploy.selected.length}/{cap})
+                {waitingOpponent
+                  ? t('livePvpWaitingDeploy') || 'Waiting opponent…'
+                  : isLiveDuel
+                    ? `${t('livePvpReady') || 'Ready'} (${deploy.selected.length}/${cap})`
+                    : `${t('fight')} (${deploy.selected.length}/${cap})`}
               </button>
             </>
           ) : (
@@ -646,6 +763,10 @@ export function MissionScreen({
                 type="button"
                 disabled={!humanActive}
                 onClick={() => {
+                  if (isLiveDuel) {
+                    emitLiveAction({ type: 'endTurn', unitId: active?.id });
+                    return;
+                  }
                   endUnitTurn(battle);
                   afterPlayer();
                 }}
@@ -656,6 +777,15 @@ export function MissionScreen({
                 type="button"
                 className="ghost"
                 onClick={() => {
+                  if (isLiveDuel && deploy?.liveMatchId) {
+                    connectRealtime().emit('live:finish', {
+                      matchId: deploy.liveMatchId,
+                      victory: false,
+                    });
+                    liveDoneRef.current = true;
+                    onDefeat(battle);
+                    return;
+                  }
                   forfeitBattle(battle);
                   if (battle.mode === 'victory') onVictory(battle);
                   else onDefeat(battle);
@@ -678,9 +808,9 @@ export function MissionScreen({
           onClick={onCanvasClick}
         >
           {phase === 'play' && active ? (
-            <div className={`battle-turn-chip ${active.team === 'player' ? 'ally' : 'foe'}`}>
+            <div className={`battle-turn-chip ${active.team === myTeam ? 'ally' : 'foe'}`}>
               <span className="battle-turn-chip__label">
-                {active.team === 'player' ? t('yourTurn') : t('enemyTurn')}
+                {active.team === myTeam ? t('yourTurn') : t('enemyTurn')}
               </span>
               <strong>{active.name}</strong>
               <span className="muted">

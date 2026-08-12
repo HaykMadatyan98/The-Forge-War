@@ -5,7 +5,7 @@ import { claimQuestReward, isQuestObjectiveMet, questList, syncQuestObjectives }
 describe('quests', () => {
   it('tracks craft weapon when stash has weapon', () => {
     const s = createInitialState('en');
-    s.items.weapon1 = {
+    (s.items as any).weapon1 = {
       id: 'weapon1',
       blueprintId: 'bp_copper_sword',
       slot: 'weapon',
@@ -19,7 +19,7 @@ describe('quests', () => {
 
   it('claims reward once', () => {
     const s = createInitialState('en');
-    s.items.weapon1 = {
+    (s.items as any).weapon1 = {
       id: 'weapon1',
       blueprintId: 'bp_copper_sword',
       slot: 'weapon',

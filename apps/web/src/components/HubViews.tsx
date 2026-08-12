@@ -77,13 +77,19 @@ import {
   questsSummary,
   claimQuestReward,
   syncQuestObjectives,
+  dailyList,
+  claimDailyReward,
+  bumpDaily,
+  TOURNAMENT_MOCKS,
+  canEnterTournament,
+  markPvpRating,
 } from '@tfw/game';
-import { fetchMyPvp, fetchPvpOpponents, type PvpOpponent, type PublicPlayer } from '@/lib/api';
+import { fetchMyPvp, fetchPvpLadder, fetchPvpOpponents, type PvpLadderRow, type PvpOpponent, type PublicPlayer } from '@/lib/api';
 import {
+  LIVE_QUEUE_TIMEOUT_MS,
   connectRealtime,
   reconnectRealtime,
   subscribeRealtimeStatus,
-  LIVE_QUEUE_TIMEOUT_MS,
   type LiveMatchedEvent,
   type RealtimeStatus,
 } from '@/lib/realtime';
@@ -501,7 +507,10 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
                         else if (res.err === 'locked') flash(t('lockedByResearch'));
                         else if (res.err === 'no_energy') flash(`${t('noEnergy')} (${res.need})`);
                         else flash(res.err);
-                      } else refresh();
+                      } else {
+                        bumpDaily(state, 'daily_mine');
+                        refresh();
+                      }
                     }}
                   >
                     {t('startMine')} (+{yieldAmt})
@@ -555,7 +564,10 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
                         } else if (res.err === 'no_slot') flash(t('noSlot'));
                         else if (res.err === 'no_energy') flash(`${t('noEnergy')} (${res.need})`);
                         else flash(res.err === 'locked' ? t('lockedByResearch') : res.err);
-                      } else refresh();
+                      } else {
+                        bumpDaily(state, 'daily_smelt');
+                        refresh();
+                      }
                     }}
                   >
                     {t('refining')}
@@ -694,7 +706,10 @@ export function ForgeView({ state, refresh, flash }: { state: any; refresh: () =
                     else if (res.err === 'no_slot') flash(t('noSlot'));
                     else if (res.err === 'no_energy') flash(`${t('noEnergy')} (${res.need})`);
                     else flash(res.err);
-                  } else refresh();
+                  } else {
+                    bumpDaily(state, 'daily_craft');
+                    refresh();
+                  }
                 }}
               >
                 {t('craft')}
@@ -773,7 +788,10 @@ export function ResearchView({ state, refresh, flash }: { state: any; refresh: (
                   onClick={() => {
                     const res = startResearch(state, tech);
                     if (!res.ok) flash(res.err === 'no_gold' ? t('noGold') : res.err);
-                    else refresh();
+                    else {
+                      bumpDaily(state, 'daily_research');
+                      refresh();
+                    }
                   }}
                 >
                   {t('researchStart')}
@@ -1344,6 +1362,7 @@ export function QuestsView({
   syncQuestObjectives(state);
   const summary = questsSummary(state);
   const list = questList(state);
+  const dailies = dailyList(state);
   const pct = Math.round((summary.pct || 0) * 100);
 
   return (
@@ -1370,6 +1389,60 @@ export function QuestsView({
         </div>
       </div>
 
+      <h3 style={{ marginTop: '0.25rem' }}>{t('dailiesTitle')}</h3>
+      <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '0.65rem' }}>
+        {t('dailiesHint')}
+      </p>
+      <div className="quest-list" style={{ marginBottom: '1.1rem' }}>
+        {dailies.map((q) => (
+          <div className={`card quest-card ${q.done ? 'done' : ''} ${q.canClaim ? 'claimable' : ''}`} key={q.id}>
+            <div className="row" style={{ justifyContent: 'space-between', gap: '0.5rem' }}>
+              <div>
+                <b>
+                  {q.done ? '✓ ' : ''}
+                  {t(q.labelKey)}
+                </b>
+                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
+                  {t(q.detailKey)} · {q.progress}/{q.target}
+                </p>
+                <span className="muted" style={{ fontSize: '0.8rem' }}>
+                  {t('questRewardGold')}: {q.rewardGold} {t('gold')}
+                  {q.rewardSparks ? ` · ${q.rewardSparks} ${t('sparks')}` : ''}
+                </span>
+              </div>
+              <div className="row" style={{ flexShrink: 0, gap: 6 }}>
+                {q.canClaim ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      const res = claimDailyReward(state, q.id);
+                      if (!res.ok) {
+                        flash(res.err || 'err');
+                        return;
+                      }
+                      refresh();
+                      flash(
+                        `+${res.gold} ${t('gold')}${res.sparks ? ` · +${res.sparks} ${t('sparks')}` : ''}`,
+                      );
+                    }}
+                  >
+                    {t('questClaim')}
+                  </button>
+                ) : q.claimed ? (
+                  <span className="badge">{t('questClaimed')}</span>
+                ) : (
+                  <button type="button" className="ghost" onClick={() => goTab(q.tab)}>
+                    {t('continue')}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <h3>{t('questsStory')}</h3>
       {summary.next ? (
         <div className="card quest-active-banner" style={{ marginBottom: '0.85rem' }}>
           <div className="muted">{t('questActive')}</div>
@@ -1457,14 +1530,18 @@ export function PvpView({
   onPostDefense: () => Promise<void> | void;
   onLiveMatch?: (ev: LiveMatchedEvent) => void;
 }) {
-  const [mode, setMode] = useState<'players' | 'ai'>('players');
+  const [mode, setMode] = useState<'players' | 'ai' | 'ladder' | 'cups'>('players');
   const [opponents, setOpponents] = useState<PvpOpponent[]>([]);
   const [mine, setMine] = useState<{
     power: number;
     wins: number;
     losses: number;
+    rating?: number;
+    ratingGames?: number;
     updatedAt?: string;
   } | null>(null);
+  const [ladder, setLadder] = useState<PvpLadderRow[]>([]);
+  const [ladderMe, setLadderMe] = useState<PvpLadderRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [posting, setPosting] = useState(false);
   const [liveStatus, setLiveStatus] = useState<'idle' | 'queued' | 'matched'>('idle');
@@ -1472,6 +1549,7 @@ export function PvpView({
   const [rtStatus, setRtStatus] = useState<RealtimeStatus | null>(null);
   const [queueStartedAt, setQueueStartedAt] = useState<number | null>(null);
   const myPower = extractDefenseSquad(state).power || 0;
+  const myRating = mine?.rating ?? 1000;
   const defenseStale =
     !!mine && Math.abs((mine.power || 0) - myPower) >= 8;
   const defenseMissing = !!player && !mine;
@@ -1479,10 +1557,15 @@ export function PvpView({
   function reload() {
     if (!player) return;
     setLoading(true);
-    Promise.all([fetchPvpOpponents(12, myPower), fetchMyPvp()])
-      .then(([list, me]) => {
+    Promise.all([fetchPvpOpponents(12, myPower), fetchMyPvp(), fetchPvpLadder(20)])
+      .then(([list, me, lad]) => {
         setOpponents(list.opponents || []);
         setMine(me.defense);
+        setLadder(lad.ladder || []);
+        setLadderMe(lad.me);
+        if (me.defense?.rating != null) {
+          markPvpRating(state, me.defense.rating);
+        }
       })
       .catch(() => flash(t('authFail')))
       .finally(() => setLoading(false));
@@ -1572,7 +1655,7 @@ export function PvpView({
     setQueueStartedAt(Date.now());
     sock.emit(
       'live:queue',
-      {},
+      { mode: 'duel' },
       (res: LiveMatchedEvent & { status?: string; error?: string }) => {
         if (res?.error) {
           setLiveStatus('idle');
@@ -1635,11 +1718,16 @@ export function PvpView({
             {t('pvpPower')}: <b>{myPower}</b>
           </div>
           {mine ? (
-            <div className="muted">
-              {t('pvpRecord')}: {mine.wins}
-              {t('pvpWins')} / {mine.losses}
-              {t('pvpLosses')}
-            </div>
+            <>
+              <div>
+                {t('pvpRating')}: <b>{mine.rating ?? 1000}</b>
+              </div>
+              <div className="muted">
+                {t('pvpRecord')}: {mine.wins}
+                {t('pvpWins')} / {mine.losses}
+                {t('pvpLosses')}
+              </div>
+            </>
           ) : null}
         </div>
       </div>
@@ -1647,7 +1735,7 @@ export function PvpView({
       {player ? (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3>{t('livePvp') || 'Live PvP'}</h3>
-          <p className="muted">{t('livePvpHint') || 'Real-time matchmaking via WebSocket'}</p>
+          <p className="muted">{t('livePvpHintDuel')}</p>
           <p className="muted" style={{ fontSize: '0.82rem' }}>
             {t('livePvpFightHint')}
           </p>
@@ -1747,7 +1835,116 @@ export function PvpView({
         <button type="button" className={mode === 'ai' ? 'primary' : 'ghost'} onClick={() => setMode('ai')}>
           {t('pvpModeAi')}
         </button>
+        <button
+          type="button"
+          className={mode === 'ladder' ? 'primary' : 'ghost'}
+          onClick={() => setMode('ladder')}
+        >
+          {t('pvpModeLadder')}
+        </button>
+        <button type="button" className={mode === 'cups' ? 'primary' : 'ghost'} onClick={() => setMode('cups')}>
+          {t('pvpModeCups')}
+        </button>
       </div>
+
+      {mode === 'ladder' ? (
+        <div className="pvp-list">
+          {!player ? (
+            <p className="muted">{t('pvpNeedLogin')}</p>
+          ) : (
+            <>
+              {ladderMe ? (
+                <div className="card pvp-card" style={{ marginBottom: '0.75rem' }}>
+                  <b>
+                    {t('pvpYourRank')}: #{ladderMe.rank}
+                  </b>
+                  <div className="muted">
+                    {t('pvpRating')} {ladderMe.rating} · {ladderMe.wins}
+                    {t('pvpWins')}/{ladderMe.losses}
+                    {t('pvpLosses')}
+                  </div>
+                </div>
+              ) : null}
+              {ladder.length === 0 ? (
+                <p className="muted">{t('pvpLadderEmpty')}</p>
+              ) : (
+                ladder.map((row) => (
+                  <div key={row.playerId} className="card pvp-card">
+                    <div className="pvp-card-main">
+                      <AccountAvatar avatarKey={row.avatarKey} name={row.displayName} size={44} />
+                      <div className="pvp-card-body">
+                        <div className="pvp-card-top">
+                          <b>
+                            #{row.rank} {row.displayName}
+                          </b>
+                          <span className="badge">{row.rating}</span>
+                        </div>
+                        <div className="muted pvp-card-meta">
+                          {t('pvpPower')} {row.power}
+                          <span className="dot">·</span>
+                          {row.wins}
+                          {t('pvpWins')}/{row.losses}
+                          {t('pvpLosses')}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {mode === 'cups' ? (
+        <div className="pvp-list">
+          <p className="muted" style={{ marginBottom: '0.75rem' }}>
+            {t('tourMockHint')}
+          </p>
+          {TOURNAMENT_MOCKS.map((cup) => {
+            const eligible = canEnterTournament(cup, myRating);
+            return (
+              <div key={cup.id} className="card pvp-card">
+                <div className="pvp-card-body">
+                  <div className="pvp-card-top">
+                    <b>{t(cup.nameKey)}</b>
+                    <span className="badge">{t(`tourStatus_${cup.status}`)}</span>
+                  </div>
+                  <p className="muted" style={{ fontSize: '0.85rem', margin: '0.35rem 0' }}>
+                    {t(cup.detailKey)}
+                  </p>
+                  <div className="muted pvp-card-meta">
+                    {t('pvpRating')}: {cup.ratingMin}
+                    {cup.ratingMax != null ? `–${cup.ratingMax}` : '+'}
+                    <span className="dot">·</span>
+                    {t('tourDeployCap')}: {cup.deployCap}
+                    <span className="dot">·</span>
+                    {cup.entrants}/{cup.maxEntrants}
+                    <span className="dot">·</span>
+                    {cup.entrySparks} {t('sparks')}
+                  </div>
+                  <div className="muted" style={{ fontSize: '0.8rem', marginTop: 4 }}>
+                    {t(cup.prizeKey)} · {t('tourStartsIn')}: {cup.startsInHours}h
+                  </div>
+                  <button
+                    type="button"
+                    className="primary"
+                    style={{ marginTop: '0.55rem' }}
+                    disabled={!eligible || cup.status !== 'open'}
+                    onClick={() => flash(t('tourSoon'))}
+                  >
+                    {!eligible
+                      ? t('tourIneligible')
+                      : cup.status === 'open'
+                        ? t('tourEnter')
+                        : t(`tourStatus_${cup.status}`)}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       {mode === 'players' ? (
         <>
@@ -1833,7 +2030,7 @@ export function PvpView({
             )}
           </div>
         </>
-      ) : (
+      ) : mode === 'ai' ? (
         <div className="pvp-ai-grid">
           {(['easy', 'normal', 'hard'] as const).map((d) => {
             const sample = createBotDefenseSquad(7, d, myPower);
@@ -1873,7 +2070,7 @@ export function PvpView({
             );
           })}
         </div>
-      )}
+      ) : null}
     </>
   );
 }

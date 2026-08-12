@@ -101,9 +101,13 @@ model PvpDefense {
   squadJson   String   @db.Text
   wins        Int      @default(0)
   losses      Int      @default(0)
+  /// Elo-like arena rating
+  rating      Int      @default(1000)
+  ratingGames Int      @default(0)
   updatedAt   DateTime @updatedAt
 
   @@index([power])
+  @@index([rating])
   @@index([updatedAt])
 }
 

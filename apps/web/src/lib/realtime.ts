@@ -31,6 +31,7 @@ export type LiveMatchedEvent = {
   matchId: string;
   opponentId: string;
   youAre?: 'A' | 'B';
+  mode?: 'ghost' | 'duel';
   opponent?: {
     warriors: any[];
     items: Record<string, any>;

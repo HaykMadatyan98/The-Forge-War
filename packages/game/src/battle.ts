@@ -166,15 +166,18 @@ export function battleMapSeed(missionId, difficulty) {
     .reduce((a, c) => a + c.charCodeAt(0), 0) + String(difficulty || '').length * 17;
 }
 
-/** Player deployment columns (left side of the board). */
-export function isDeployTile(x, y) {
+/** Player deployment columns. side: left (A) or right (B live duel). */
+export function isDeployTile(x, y, side = 'left') {
+  if (side === 'right') return x >= MAP_W - 3 && x < MAP_W && y >= 0 && y < MAP_H;
   return x >= 0 && x <= 2 && y >= 0 && y < MAP_H;
 }
 
-export function deployTileKeys() {
+export function deployTileKeys(side = 'left') {
   const keys = [];
+  const x0 = side === 'right' ? MAP_W - 3 : 0;
+  const x1 = side === 'right' ? MAP_W - 1 : 2;
   for (let y = 0; y < MAP_H; y++) {
-    for (let x = 0; x <= 2; x++) keys.push(`${x},${y}`);
+    for (let x = x0; x <= x1; x++) keys.push(`${x},${y}`);
   }
   return keys;
 }

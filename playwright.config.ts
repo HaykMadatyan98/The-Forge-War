@@ -26,7 +26,7 @@ export default defineConfig({
         PORT: String(API_PORT),
         DATABASE_URL:
           process.env.DATABASE_URL ||
-          'postgresql://tfw:tfw_ci_test@localhost:5433/tfw?schema=public',
+          'postgresql://tfw:tfw_local_dev_only@127.0.0.1:5433/tfw?schema=public',
         WEB_ORIGIN: `http://127.0.0.1:${WEB_PORT}`,
         RETURN_VERIFY_TOKEN_ON_MAIL_FAIL: '1',
         VALIDATE_PVP: '1',

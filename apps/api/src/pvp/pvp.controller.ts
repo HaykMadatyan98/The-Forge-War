@@ -51,6 +51,13 @@ export class PvpController {
     return this.pvp.myDefense(player.id);
   }
 
+  @Get('ladder')
+  async ladder(@Req() req: Request, @Query('limit') limit?: string) {
+    const player = await this.needPlayer(req);
+    const n = Math.min(50, Math.max(5, Number(limit) || 20));
+    return this.pvp.ladder(n, player.id);
+  }
+
   @Post('challenge')
   async challenge(@Req() req: Request, @Body() body: { opponentId?: string }) {
     const player = await this.needPlayer(req);

@@ -52,7 +52,7 @@ test.describe('auth → hub → quests', () => {
     if (await emailInput.isVisible().catch(() => false)) {
       await emailInput.fill(email);
       await passInput.fill(password);
-      await page.getByRole('button', { name: /Log in|Войти/i }).click();
+      await page.locator('form').getByRole('button', { name: /Log in|Войти/i }).click();
     }
 
     await expect(page.getByRole('button', { name: /New Campaign|Новая кампания/i })).toBeVisible({

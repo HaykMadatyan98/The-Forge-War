@@ -247,6 +247,7 @@ export type PvpOpponent = {
   power: number;
   wins: number;
   losses: number;
+  rating?: number;
   warriorCount: number;
   rosterPreview?: { name: string; level: number }[];
   squad: { warriors: any[]; items: Record<string, any>; power?: number };
@@ -286,11 +287,35 @@ export async function fetchMyPvp() {
       power: number;
       wins: number;
       losses: number;
+      rating?: number;
+      ratingGames?: number;
       updatedAt: string;
       displayName?: string | null;
       avatarKey?: string | null;
     };
   }>;
+}
+
+export type PvpLadderRow = {
+  rank: number;
+  playerId: string;
+  displayName: string;
+  avatarKey: string | null;
+  rating: number;
+  wins: number;
+  losses: number;
+  power: number;
+  ratingGames?: number;
+};
+
+export async function fetchPvpLadder(limit = 20) {
+  const res = await fetch(`${API_URL}/pvp/ladder?limit=${limit}`, {
+    headers: authHeaders(false),
+    cache: 'no-store',
+    credentials: cred,
+  });
+  if (!res.ok) return { ladder: [] as PvpLadderRow[], me: null as PvpLadderRow | null };
+  return res.json() as Promise<{ ladder: PvpLadderRow[]; me: PvpLadderRow | null }>;
 }
 
 export async function startPvpChallenge(opponentId: string) {
@@ -460,7 +485,7 @@ export async function reportPvpResult(
   deploy?: { deployWarriorIds?: string[]; deployPositions?: { x: number; y: number }[] },
 ) {
   try {
-    await apiFetch('/pvp/result', {
+    const res = await apiFetch('/pvp/result', {
       method: 'POST',
       body: JSON.stringify({
         matchId,
@@ -469,8 +494,13 @@ export async function reportPvpResult(
         deployPositions: deploy?.deployPositions,
       }),
     });
+    return (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      victory?: boolean;
+      rating?: { a: number; b: number; deltaA: number; deltaB: number } | null;
+    };
   } catch {
-    /* offline */
+    return null;
   }
 }
 

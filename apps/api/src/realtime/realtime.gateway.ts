@@ -26,7 +26,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   @WebSocketServer()
   server!: Server;
 
-  private online = new Map<string, string>(); // playerId -> socketId
+  private online = new Map<string, string>();
 
   constructor(
     private readonly auth: AuthService,
@@ -86,10 +86,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage('live:queue')
-  async onLiveQueue(@ConnectedSocket() client: AuthedSocket) {
+  async onLiveQueue(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body?: { mode?: 'ghost' | 'duel' },
+  ) {
     const playerId = client.playerId;
     if (!playerId) return { error: 'unauthorized' };
-    const result = await this.livePvp.joinQueue(playerId);
+    const mode = body?.mode === 'ghost' ? 'ghost' : 'duel';
+    const result = await this.livePvp.joinQueue(playerId, mode);
     if (result.status === 'error') return { error: result.error };
     if (result.status === 'matched') {
       const forSelf = {
@@ -97,6 +101,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         opponentId: result.opponentId,
         opponent: result.opponent,
         youAre: result.youAre,
+        mode: result.mode,
       };
       this.server.to(`player:${playerId}`).emit('live:matched', forSelf);
 
@@ -110,6 +115,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
             opponentId: forOther.opponentId,
             opponent: forOther.opponent,
             youAre: forOther.youAre,
+            mode: forOther.mode,
           });
         }
       }
@@ -125,15 +131,96 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return this.livePvp.leaveQueue(playerId);
   }
 
-  @SubscribeMessage('live:action')
-  onLiveAction(
+  @SubscribeMessage('live:deploy')
+  onLiveDeploy(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody()
+    body: { matchId?: string; warriorIds?: string[]; positions?: { x: number; y: number }[] },
+  ) {
+    const playerId = client.playerId;
+    if (!playerId) return { error: 'unauthorized' };
+    const matchId = String(body?.matchId || '');
+    const res = this.livePvp.setDeploy(playerId, matchId, {
+      warriorIds: body?.warriorIds || [],
+      positions: body?.positions || [],
+    });
+    if (!res.ok) return { error: res.error };
+
+    const match = this.livePvp.getMatch(matchId);
+    if (res.started && match && 'battle' in res) {
+      const payload = {
+        matchId,
+        battle: res.battle,
+        playerA: match.playerA,
+        playerB: match.playerB,
+      };
+      this.server.to(`player:${match.playerA}`).emit('live:battle_start', {
+        ...payload,
+        youAre: 'A',
+      });
+      this.server.to(`player:${match.playerB}`).emit('live:battle_start', {
+        ...payload,
+        youAre: 'B',
+      });
+      return { ok: true, started: true };
+    }
+
+    if (match) {
+      const other = match.playerA === playerId ? match.playerB : match.playerA;
+      this.server.to(`player:${other}`).emit('live:deploy_ready', {
+        matchId,
+        from: playerId,
+      });
+    }
+    return { ok: true, waiting: true };
+  }
+
+  @SubscribeMessage('live:turn')
+  async onLiveTurn(
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { matchId?: string; action?: unknown },
   ) {
     const playerId = client.playerId;
     if (!playerId) return { error: 'unauthorized' };
+    const matchId = String(body?.matchId || '');
+    const res = this.livePvp.applyAction(playerId, matchId, body?.action);
+    if (!res.ok) return { error: res.error };
+
+    const match = this.livePvp.getMatch(matchId);
+    if (!match) return { error: 'no_match' };
+
+    const statePayload = {
+      matchId,
+      battle: res.battle,
+      from: playerId,
+      mode: res.mode,
+    };
+    this.server.to(`player:${match.playerA}`).emit('live:state', statePayload);
+    this.server.to(`player:${match.playerB}`).emit('live:state', statePayload);
+
+    if (res.finished && res.winnerId) {
+      await this.livePvp.finishMatch(matchId, res.winnerId);
+      const finished = {
+        matchId,
+        winnerId: res.winnerId,
+        status: 'finished',
+      };
+      this.server.to(`player:${match.playerA}`).emit('live:finished', finished);
+      this.server.to(`player:${match.playerB}`).emit('live:finished', finished);
+    }
+    return { ok: true, finished: !!res.finished, winnerId: res.winnerId };
+  }
+
+  @SubscribeMessage('live:action')
+  onLiveAction(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { matchId?: string; action?: unknown },
+  ) {
+    // Legacy relay — prefer live:turn for authoritative duel
+    const playerId = client.playerId;
+    if (!playerId) return { error: 'unauthorized' };
     const match = this.livePvp.getMatch(String(body?.matchId || ''));
-    if (!match || match.status !== 'active') return { error: 'no_match' };
+    if (!match || (match.status !== 'active' && match.status !== 'deploy')) return { error: 'no_match' };
     const opponentId = match.playerA === playerId ? match.playerB : match.playerA;
     this.server.to(`player:${opponentId}`).emit('live:action', {
       matchId: match.id,
@@ -144,7 +231,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage('live:finish')
-  onLiveFinish(
+  async onLiveFinish(
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { matchId?: string; victory?: boolean },
   ) {
@@ -153,7 +240,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const match = this.livePvp.getMatch(String(body?.matchId || ''));
     if (!match) return { error: 'no_match' };
     const winnerId = body?.victory ? playerId : match.playerA === playerId ? match.playerB : match.playerA;
-    const finished = this.livePvp.finishMatch(match.id, winnerId);
+    const finished = await this.livePvp.finishMatch(match.id, winnerId);
     if (!finished) return { error: 'no_match' };
     this.server.to(`player:${match.playerA}`).emit('live:finished', {
       matchId: finished.id,

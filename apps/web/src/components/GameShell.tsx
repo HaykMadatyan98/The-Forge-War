@@ -28,8 +28,12 @@ import {
   activeQuestHint,
   markPvpDefensePosted,
   markPvpWin,
+  markLiveWin,
+  markPvpRating,
   questsSummary,
   notifyQuestCompletions,
+  bumpDaily,
+  notifyDailyCompletions,
 } from '@tfw/game';
 import {
   pushSave,
@@ -535,6 +539,8 @@ export function GameShell() {
     avatarKey?: string | null;
     isBot?: boolean;
     liveMatchId?: string;
+    liveMode?: 'ghost' | 'duel';
+    youAre?: 'A' | 'B';
     squad: { warriors: any[]; items: Record<string, any>; power?: number };
   }) {
     if (!state?.warriors?.length) {
@@ -543,6 +549,7 @@ export function GameShell() {
     }
     const isBot = !!opponent.isBot || opponent.playerId.startsWith('bot_');
     const isLive = !!opponent.liveMatchId;
+    const liveMode = opponent.liveMode || (isLive ? 'duel' : undefined);
     let squad = opponent.squad;
     let matchId: string | null = null;
     let displayName = opponent.displayName;
@@ -557,24 +564,24 @@ export function GameShell() {
         const ch = await startPvpChallenge(opponent.playerId);
         matchId = ch.matchId;
         squad = ch.opponent.squad;
-        displayName = ch.opponent.displayName;
-        avatarKey = ch.opponent.avatarKey;
-      } catch (e: any) {
-        const msg = e?.data?.message || e?.message || '';
-        if (msg === 'defender_cooldown') flash(t('pvpDefCooldown'));
-        else if (msg === 'match_rate_limited' || msg === 'rate_limited') flash(t('authRateLimited'));
-        else if (msg === 'no_cloud_save' || msg === 'empty_squad') flash(t('pvpDefenseNeed'));
-        else flash(t('pvpChallengeFail'));
+        displayName = ch.opponent.displayName || displayName;
+        avatarKey = ch.opponent.avatarKey ?? avatarKey;
+      } catch {
+        flash(t('authFail'));
         return;
       }
     }
 
+    if (!squad?.warriors?.length) {
+      flash(t('pvpDefenseNeed'));
+      return;
+    }
+
+    setPvpMatchId(isLive ? null : matchId);
     if (isLive) {
       setLiveMatchId(opponent.liveMatchId || null);
-      setPvpMatchId(null);
     } else {
       setLiveMatchId(null);
-      setPvpMatchId(matchId);
     }
 
     const cap = deployCap(state);
@@ -595,6 +602,8 @@ export function GameShell() {
       opponentId: opponent.playerId,
       matchId: isLive ? opponent.liveMatchId : matchId,
       liveMatchId: opponent.liveMatchId || null,
+      liveMode: liveMode || null,
+      youAre: opponent.youAre || 'A',
       isBot,
       isLive,
     });
@@ -606,19 +615,32 @@ export function GameShell() {
     if (!b) return;
     b.mode = mode;
     let res: any = { rewards: {}, unlocked: [], levelUps: [] };
-    const isPvp = b.kind === 'pvp' || b.missionId === 'pvp_arena';
+    const isPvp = b.kind === 'pvp' || b.missionId === 'pvp_arena' || b.kind === 'live';
+    const isLiveDuel = b.kind === 'live' || !!liveMatchId || !!deploy?.liveMatchId;
     if (isPvp) {
       if (mode === 'victory') {
         res = applyPvpVictory(state, b);
         markPvpWin(state);
-        const newly = notifyQuestCompletions(state);
+        bumpDaily(state, 'daily_pvp');
+        if (isLiveDuel) {
+          markLiveWin(state);
+          bumpDaily(state, 'daily_live');
+        }
+        const newlyQ = notifyQuestCompletions(state);
+        const newlyD = notifyDailyCompletions(state);
         persist(state);
         setState({ ...state });
-        if (newly.length) {
-          flash(`${t('questJustDone')}: ${newly.map((q) => t(q.labelKey)).join(', ')}`);
-        }
+        const notes = [
+          ...newlyQ.map((q) => t(q.labelKey)),
+          ...newlyD.map((q) => t(q.labelKey)),
+        ];
+        if (notes.length) flash(`${t('questJustDone')}: ${notes.join(', ')}`);
       } else {
         res = applyPvpDefeat(state, b);
+        bumpDaily(state, 'daily_pvp');
+        if (isLiveDuel) bumpDaily(state, 'daily_live');
+        persist(state);
+        setState({ ...state });
       }
       if (pvpMatchId) {
         const ids = deploy?.selected || [];
@@ -626,22 +648,34 @@ export function GameShell() {
         void reportPvpResult(pvpMatchId, mode === 'victory', {
           deployWarriorIds: ids,
           deployPositions: positions,
+        }).then((r: any) => {
+          if (r?.rating?.a != null) {
+            markPvpRating(state, r.rating.a);
+            persist(state);
+          }
         });
         setPvpMatchId(null);
       }
       if (liveMatchId || deploy?.liveMatchId) {
         const mid = liveMatchId || deploy?.liveMatchId;
-        connectRealtime().emit('live:finish', { matchId: mid, victory: mode === 'victory' });
+        // Authoritative duel already finishes via live:turn; keep finish for ghost/legacy
+        if (deploy?.liveMode !== 'duel') {
+          connectRealtime().emit('live:finish', { matchId: mid, victory: mode === 'victory' });
+        }
         setLiveMatchId(null);
       }
     } else if (mode === 'victory') {
       res = applyVictoryRewards(state, b);
-      const newly = notifyQuestCompletions(state);
+      bumpDaily(state, 'daily_campaign');
+      const newlyQ = notifyQuestCompletions(state);
+      const newlyD = notifyDailyCompletions(state);
       persist(state);
       setState({ ...state });
-      if (newly.length) {
-        flash(`${t('questJustDone')}: ${newly.map((q) => t(q.labelKey)).join(', ')}`);
-      }
+      const notes = [
+        ...newlyQ.map((q) => t(q.labelKey)),
+        ...newlyD.map((q) => t(q.labelKey)),
+      ];
+      if (notes.length) flash(`${t('questJustDone')}: ${notes.join(', ')}`);
     } else {
       res.summary = buildBattleSummary(state, b, {}, []);
     }
@@ -1265,6 +1299,8 @@ export function GameShell() {
                   avatarKey: ev.opponent.avatarKey,
                   isBot: false,
                   liveMatchId: ev.matchId,
+                  liveMode: ev.mode || 'duel',
+                  youAre: ev.youAre || 'A',
                   squad: {
                     warriors: ev.opponent.warriors,
                     items: ev.opponent.items || {},

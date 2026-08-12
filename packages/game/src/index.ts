@@ -12,3 +12,6 @@ export * from './energy';
 export * from './profile';
 export * from './pvp';
 export * from './simulate';
+export * from './tournaments';
+export * from './dailies';
+export * from './liveBattle';
