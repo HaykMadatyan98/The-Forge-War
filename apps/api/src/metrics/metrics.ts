@@ -11,6 +11,9 @@ export type MetricEvent =
   | 'live_pvp_matched'
   | 'live_pvp_finished'
   | 'live_pvp_queue_rejected'
+  | 'live_pvp_disconnect'
+  | 'live_pvp_action_rejected'
+  | 'live_pvp_rejoin'
   | 'save_conflict';
 
 export function logMetric(event: MetricEvent, data: Record<string, unknown> = {}) {

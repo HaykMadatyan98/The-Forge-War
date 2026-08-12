@@ -27,18 +27,52 @@ export type ChatMessageEvent = {
   sender?: { id: string; displayName: string | null; avatarKey: string | null };
 };
 
+export type LiveSquadEvent = {
+  warriors: any[];
+  items: Record<string, any>;
+  power: number;
+  displayName: string;
+  avatarKey: string | null;
+  rating?: number;
+};
+
 export type LiveMatchedEvent = {
   matchId: string;
   opponentId: string;
   youAre?: 'A' | 'B';
   mode?: 'ghost' | 'duel';
-  opponent?: {
-    warriors: any[];
-    items: Record<string, any>;
-    power: number;
-    displayName: string;
-    avatarKey: string | null;
-  };
+  opponent?: LiveSquadEvent;
+};
+
+export type LiveRejoinEvent = {
+  matchId: string;
+  youAre: 'A' | 'B';
+  status: 'waiting' | 'deploy' | 'active' | 'finished';
+  opponent: LiveSquadEvent;
+  opponentId: string;
+  battle?: any;
+  turnDeadline?: number;
+  turnSide?: 'A' | 'B';
+  deployReady: { self: boolean; opponent: boolean };
+  mode: 'ghost' | 'duel';
+};
+
+export type LiveFinishedEvent = {
+  matchId: string;
+  winnerId?: string;
+  status?: string;
+  youWon: boolean;
+  rating?: { before: number; after: number; delta: number } | null;
+};
+
+export type LiveStateEvent = {
+  matchId: string;
+  battle?: any;
+  from?: string;
+  mode?: string;
+  turnDeadline?: number;
+  turnSide?: 'A' | 'B';
+  status?: string;
 };
 
 let socket: Socket | null = null;

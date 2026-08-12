@@ -80,7 +80,7 @@ import { SocialPanel } from './SocialPanel';
 import { HubNav, type HubTab } from './HubNav';
 import { OnboardingOverlay } from './OnboardingOverlay';
 import { connectRealtime, disconnectRealtime } from '@/lib/realtime';
-import type { LiveMatchedEvent } from '@/lib/realtime';
+import type { LiveFinishedEvent, LiveMatchedEvent, LiveRejoinEvent } from '@/lib/realtime';
 
 type Screen = 'boot' | 'hub' | 'deploy' | 'battle' | 'summary' | 'levelup' | 'briefing';
 
@@ -117,6 +117,11 @@ export function GameShell() {
   const [oauthCfg, setOauthCfg] = useState<OauthConfig | null>(null);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const [, tick] = useState(0);
+  const liveRatingRef = useRef<{ before: number; after: number; delta: number } | null>(null);
+  const screenRef = useRef(screen);
+  const deployRef = useRef(deploy);
+  screenRef.current = screen;
+  deployRef.current = deploy;
 
   useEffect(() => {
     const saved = loadSave();
@@ -537,6 +542,11 @@ export function GameShell() {
     liveMode?: 'ghost' | 'duel';
     youAre?: 'A' | 'B';
     squad: { warriors: any[]; items: Record<string, any>; power?: number };
+    rejoinBattle?: any;
+    rejoinPhase?: 'deploy' | 'play';
+    rejoinDeployReady?: { self: boolean; opponent: boolean };
+    rejoinTurnDeadline?: number;
+    rejoinTurnSide?: 'A' | 'B';
   }) {
     if (!state?.warriors?.length) {
       flash(t('pvpDefenseNeed'));
@@ -601,9 +611,56 @@ export function GameShell() {
       youAre: opponent.youAre || 'A',
       isBot,
       isLive,
+      rejoinBattle: opponent.rejoinBattle || null,
+      rejoinPhase: opponent.rejoinPhase || null,
+      rejoinDeployReady: opponent.rejoinDeployReady || null,
+      rejoinTurnDeadline: opponent.rejoinTurnDeadline ?? null,
+      rejoinTurnSide: opponent.rejoinTurnSide ?? null,
     });
     setScreen('deploy');
   }
+
+  useEffect(() => {
+    if (!player) return;
+    const sock = connectRealtime();
+
+    const onFinished = (ev: LiveFinishedEvent) => {
+      if (ev.rating) liveRatingRef.current = ev.rating;
+    };
+
+    const onRejoin = (ev: LiveRejoinEvent) => {
+      if (ev.status === 'finished') return;
+      if (screenRef.current === 'deploy' && deployRef.current?.liveMatchId === ev.matchId) return;
+      flash(t('livePvpRejoin'));
+      void beginPvp({
+        playerId: ev.opponentId,
+        displayName: ev.opponent.displayName,
+        avatarKey: ev.opponent.avatarKey,
+        isBot: false,
+        liveMatchId: ev.matchId,
+        liveMode: ev.mode || 'duel',
+        youAre: ev.youAre,
+        squad: {
+          warriors: ev.opponent.warriors,
+          items: ev.opponent.items || {},
+          power: ev.opponent.power,
+        },
+        rejoinBattle: ev.battle,
+        rejoinPhase: ev.status === 'active' ? 'play' : 'deploy',
+        rejoinDeployReady: ev.deployReady,
+        rejoinTurnDeadline: ev.turnDeadline,
+        rejoinTurnSide: ev.turnSide,
+      });
+    };
+
+    sock.on('live:finished', onFinished);
+    sock.on('live:rejoin', onRejoin);
+    return () => {
+      sock.off('live:finished', onFinished);
+      sock.off('live:rejoin', onRejoin);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player?.id]);
 
   function endBattleResult(mode: 'victory' | 'defeat', finishedBattle?: any) {
     const b = finishedBattle || battle;
@@ -678,6 +735,12 @@ export function GameShell() {
       res.summary = buildBattleSummary(state, b, {}, []);
     }
     const sum = res.summary || buildBattleSummary(state, b, res.rewards || {}, res.unlocked || []);
+    if (liveRatingRef.current) {
+      sum.rating = liveRatingRef.current;
+      markPvpRating(state, liveRatingRef.current.after);
+      persist(state);
+      liveRatingRef.current = null;
+    }
     setSummary(sum);
     setBattle(null);
     setDeploy(null);
@@ -1376,6 +1439,25 @@ function BattleSummaryView({
                     : ''}
                 </div>
               ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {summary.rating ? (
+          <div className="summary-stat-row" style={{ marginTop: '0.75rem' }}>
+            <div className="summary-pill">
+              <span className="muted">{t('pvpRating')}</span>
+              <b>{summary.rating.after}</b>
+            </div>
+            <div className="summary-pill">
+              <span className="muted">{t('pvpRatingDelta')}</span>
+              <b style={{ color: summary.rating.delta >= 0 ? 'var(--good)' : 'var(--bad)' }}>
+                {summary.rating.delta >= 0 ? '+' : ''}
+                {summary.rating.delta}
+              </b>
+              <span className="muted" style={{ fontSize: '0.78rem', marginLeft: 6 }}>
+                ({summary.rating.before} → {summary.rating.after})
+              </span>
             </div>
           </div>
         ) : null}

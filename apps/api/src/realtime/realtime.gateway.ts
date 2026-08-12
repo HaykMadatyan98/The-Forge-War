@@ -3,6 +3,7 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -22,7 +23,7 @@ type AuthedSocket = Socket & { playerId?: string };
   },
   namespace: '/realtime',
 })
-export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
@@ -33,6 +34,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly chat: ChatService,
     private readonly livePvp: LivePvpService,
   ) {}
+
+  afterInit() {
+    this.livePvp.setBroadcast((event, playerIds, payload) => {
+      for (const id of playerIds) {
+        this.server.to(`player:${id}`).emit(event, payload);
+      }
+    });
+  }
 
   private async authenticate(client: AuthedSocket): Promise<string | null> {
     const token =
@@ -56,13 +65,25 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     client.join(`player:${playerId}`);
     logMetric('ws_connect', { playerId });
     this.server.emit('presence', { playerId, online: true });
+
+    const rejoin = this.livePvp.getRejoinPayload(playerId);
+    if (rejoin) {
+      this.livePvp.markReconnected(playerId);
+      client.emit('live:rejoin', rejoin);
+      logMetric('live_pvp_rejoin', { playerId, matchId: rejoin.matchId, status: rejoin.status });
+    }
   }
 
   handleDisconnect(client: AuthedSocket) {
     const playerId = client.playerId;
     if (!playerId) return;
     this.online.delete(playerId);
-    this.livePvp.leaveQueue(playerId);
+    const inMatch = this.livePvp.getMatchForPlayer(playerId);
+    if (inMatch && inMatch.status !== 'finished') {
+      this.livePvp.markDisconnected(playerId);
+    } else {
+      this.livePvp.leaveQueue(playerId);
+    }
     logMetric('ws_disconnect', { playerId });
     this.server.emit('presence', { playerId, online: false });
   }
@@ -131,6 +152,16 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return this.livePvp.leaveQueue(playerId);
   }
 
+  @SubscribeMessage('live:resume')
+  onLiveResume(@ConnectedSocket() client: AuthedSocket) {
+    const playerId = client.playerId;
+    if (!playerId) return { error: 'unauthorized' };
+    const rejoin = this.livePvp.getRejoinPayload(playerId);
+    if (!rejoin) return { error: 'no_match' };
+    this.livePvp.markReconnected(playerId);
+    return { ok: true, ...rejoin };
+  }
+
   @SubscribeMessage('live:deploy')
   onLiveDeploy(
     @ConnectedSocket() client: AuthedSocket,
@@ -153,6 +184,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         battle: res.battle,
         playerA: match.playerA,
         playerB: match.playerB,
+        turnDeadline: res.turnDeadline,
+        turnSide: res.turnSide,
       };
       this.server.to(`player:${match.playerA}`).emit('live:battle_start', {
         ...payload,
@@ -162,7 +195,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         ...payload,
         youAre: 'B',
       });
-      return { ok: true, started: true };
+      return { ok: true, started: true, turnDeadline: res.turnDeadline };
     }
 
     if (match) {
@@ -170,6 +203,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.server.to(`player:${other}`).emit('live:deploy_ready', {
         matchId,
         from: playerId,
+        opponentName: match.playerA === playerId ? match.squadA?.displayName : match.squadB?.displayName,
       });
     }
     return { ok: true, waiting: true };
@@ -194,21 +228,47 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       battle: res.battle,
       from: playerId,
       mode: res.mode,
+      turnDeadline: res.turnDeadline,
+      turnSide: res.turnSide,
+      status: match.status,
     };
     this.server.to(`player:${match.playerA}`).emit('live:state', statePayload);
     this.server.to(`player:${match.playerB}`).emit('live:state', statePayload);
 
     if (res.finished && res.winnerId) {
-      await this.livePvp.finishMatch(matchId, res.winnerId);
-      const finished = {
-        matchId,
-        winnerId: res.winnerId,
-        status: 'finished',
-      };
-      this.server.to(`player:${match.playerA}`).emit('live:finished', finished);
-      this.server.to(`player:${match.playerB}`).emit('live:finished', finished);
+      const finished = await this.livePvp.finishMatch(matchId, res.winnerId);
+      if (finished) {
+        this.server
+          .to(`player:${finished.playerA}`)
+          .emit('live:finished', this.liveFinishedPayload(finished, finished.playerA));
+        this.server
+          .to(`player:${finished.playerB}`)
+          .emit('live:finished', this.liveFinishedPayload(finished, finished.playerB));
+      }
     }
-    return { ok: true, finished: !!res.finished, winnerId: res.winnerId };
+    return {
+      ok: true,
+      finished: !!res.finished,
+      winnerId: res.winnerId,
+      turnDeadline: res.turnDeadline,
+    };
+  }
+
+  private liveFinishedPayload(match: NonNullable<ReturnType<LivePvpService['getMatch']>>, playerId: string) {
+    const youAre = match.playerA === playerId ? 'A' : 'B';
+    const r = match.ratingResult;
+    let rating: { before: number; after: number; delta: number } | null = null;
+    if (r) {
+      if (youAre === 'A') rating = { before: r.beforeA, after: r.afterA, delta: r.deltaA };
+      else rating = { before: r.beforeB, after: r.afterB, delta: r.deltaB };
+    }
+    return {
+      matchId: match.id,
+      winnerId: match.winnerId,
+      status: match.status,
+      youWon: match.winnerId === playerId,
+      rating,
+    };
   }
 
   @SubscribeMessage('live:action')
@@ -216,7 +276,6 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { matchId?: string; action?: unknown },
   ) {
-    // Legacy relay — prefer live:turn for authoritative duel
     const playerId = client.playerId;
     if (!playerId) return { error: 'unauthorized' };
     const match = this.livePvp.getMatch(String(body?.matchId || ''));
@@ -242,16 +301,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const winnerId = body?.victory ? playerId : match.playerA === playerId ? match.playerB : match.playerA;
     const finished = await this.livePvp.finishMatch(match.id, winnerId);
     if (!finished) return { error: 'no_match' };
-    this.server.to(`player:${match.playerA}`).emit('live:finished', {
-      matchId: finished.id,
-      winnerId: finished.winnerId,
-      status: finished.status,
-    });
-    this.server.to(`player:${match.playerB}`).emit('live:finished', {
-      matchId: finished.id,
-      winnerId: finished.winnerId,
-      status: finished.status,
-    });
+    this.server
+      .to(`player:${finished.playerA}`)
+      .emit('live:finished', this.liveFinishedPayload(finished, finished.playerA));
+    this.server
+      .to(`player:${finished.playerB}`)
+      .emit('live:finished', this.liveFinishedPayload(finished, finished.playerB));
     return { ok: true, match: finished };
   }
 

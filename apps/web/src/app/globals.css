@@ -1251,6 +1251,21 @@ h3 {
 .battle-turn-chip.foe .battle-turn-chip__label {
   color: #e08060;
 }
+.battle-turn-timer {
+  margin-left: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+.battle-turn-timer.urgent {
+  color: var(--bad);
+  font-weight: 600;
+}
+.battle-offline-chip {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 160, 80, 0.15);
+  margin-left: 0.35rem;
+}
 .battle-turn-chip strong {
   font-size: 0.95rem;
 }

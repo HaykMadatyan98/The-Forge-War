@@ -27,6 +27,23 @@ import { warriorImageSrc } from './artCatalog';
 import { getArtImage } from './artCache';
 import { BattleWorld } from './battle3d/BattleWorld';
 import { connectRealtime } from '@/lib/realtime';
+import type { LiveFinishedEvent, LiveStateEvent } from '@/lib/realtime';
+
+const LIVE_ERR_KEYS: Record<string, string> = {
+  not_your_turn: 'liveErrNotYourTurn',
+  reconnecting: 'liveErrReconnecting',
+  not_in_match: 'liveErrNotInMatch',
+  no_match: 'liveErrNoMatch',
+  bad_move: 'liveErrBadMove',
+  bad_attack: 'liveErrBadAttack',
+  wrong_unit: 'liveErrWrongUnit',
+  rejected: 'liveErrRejected',
+};
+
+function liveErrMsg(code: string) {
+  const key = LIVE_ERR_KEYS[code];
+  return key ? t(key) : code;
+}
 
 /** Visual layer for combatants */
 type Vis = {
@@ -124,13 +141,22 @@ export function MissionScreen({
   const isLiveDuel = !!(deploy?.isLive && deploy?.liveMode === 'duel' && deploy?.liveMatchId);
   const youAre: 'A' | 'B' = deploy?.youAre === 'B' ? 'B' : 'A';
   const myTeam = youAre === 'B' ? 'enemy' : 'player';
-  const [phase, setPhase] = useState<'deploy' | 'play'>('deploy');
+  const [phase, setPhase] = useState<'deploy' | 'play'>(() =>
+    deploy?.rejoinPhase === 'play' ? 'play' : 'deploy',
+  );
   const [placingId, setPlacingId] = useState<string | null>(deploy.selected[0] || null);
-  const [waitingOpponent, setWaitingOpponent] = useState(false);
+  const [waitingOpponent, setWaitingOpponent] = useState(() =>
+    !!(isLiveDuel && deploy?.rejoinPhase !== 'play' && deploy?.rejoinDeployReady?.self && !deploy?.rejoinDeployReady?.opponent),
+  );
+  const [turnDeadline, setTurnDeadline] = useState<number | null>(deploy?.rejoinTurnDeadline ?? null);
+  const [turnSide, setTurnSide] = useState<'A' | 'B' | null>(deploy?.rejoinTurnSide ?? null);
+  const [opponentOffline, setOpponentOffline] = useState(false);
+  const [offlineGraceUntil, setOfflineGraceUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(Date.now());
   const liveDoneRef = useRef(false);
   const [battleTipDismissed, setBattleTipDismissed] = useState(!!state.flags?.battleTipSeen);
 
-  const [battle, setBattle] = useState<any>(() => snapshotForDeploy(state, deploy, 'deploy'));
+  const [battle, setBattle] = useState<any>(() => deploy?.rejoinBattle || snapshotForDeploy(state, deploy, 'deploy'));
 
   // Keep 3D combatants in sync with roster / positions during deploy only
   useEffect(() => {
@@ -143,10 +169,21 @@ export function MissionScreen({
   }, [deploy.selected, deploy.positions, deploy.missionId, deploy.difficulty, deploy.kind, deploy.defenderSquad, phase, state]);
 
   useEffect(() => {
-    if (placingId && !deploy.selected.includes(placingId)) {
-      setPlacingId(deploy.selected[0] || null);
-    }
-  }, [deploy.selected, placingId]);
+    if (!isLiveDuel || phase !== 'play') return;
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [isLiveDuel, phase]);
+
+  const turnSecondsLeft =
+    turnDeadline != null ? Math.max(0, Math.ceil((turnDeadline - now) / 1000)) : null;
+  const isMyTurnSide = turnSide === youAre;
+  const offlineGraceLeft =
+    offlineGraceUntil != null ? Math.max(0, Math.ceil((offlineGraceUntil - now) / 1000)) : null;
+
+  function syncTurnMeta(ev: { turnDeadline?: number; turnSide?: 'A' | 'B' }) {
+    if (ev.turnDeadline != null) setTurnDeadline(ev.turnDeadline);
+    if (ev.turnSide) setTurnSide(ev.turnSide);
+  }
 
   const hostRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<BattleWorld | null>(null);
@@ -427,7 +464,7 @@ export function MissionScreen({
   }, [battle, phase, onVictory, onDefeat, isLiveDuel]);
 
   function resolveLiveOutcome(b: any) {
-    if (!b || liveDoneRef.current) return;
+    if (!b || liveDoneRef.current || isLiveDuel) return;
     if (b.mode !== 'victory' && b.mode !== 'defeat') return;
     liveDoneRef.current = true;
     const iWon = youAreRef.current === 'A' ? b.mode === 'victory' : b.mode === 'defeat';
@@ -436,40 +473,84 @@ export function MissionScreen({
   }
 
   useEffect(() => {
+    if (placingId && !deploy.selected.includes(placingId)) {
+      setPlacingId(deploy.selected[0] || null);
+    }
+  }, [deploy.selected, placingId]);
+
+  useEffect(() => {
     if (!isLiveDuel) return;
     const sock = connectRealtime();
     const matchId = deploy.liveMatchId as string;
 
-    const onStart = (ev: { matchId?: string; battle?: any }) => {
+    const onStart = (ev: LiveStateEvent & { youAre?: 'A' | 'B' }) => {
       if (ev.matchId !== matchId || !ev.battle) return;
       setWaitingOpponent(false);
+      setOpponentOffline(false);
+      setOfflineGraceUntil(null);
       setBattle(ev.battle);
+      syncTurnMeta(ev);
       setPhase('play');
     };
-    const onState = (ev: { matchId?: string; battle?: any }) => {
+    const onState = (ev: LiveStateEvent) => {
       if (ev.matchId !== matchId || !ev.battle) return;
       setBattle(ev.battle);
-      resolveLiveOutcome(ev.battle);
+      syncTurnMeta(ev);
     };
-    const onFinished = (ev: { matchId?: string }) => {
-      if (ev.matchId !== matchId) return;
-      resolveLiveOutcome(battleRef.current);
+    const onFinished = (ev: LiveFinishedEvent) => {
+      if (ev.matchId !== matchId || liveDoneRef.current) return;
+      liveDoneRef.current = true;
+      if (ev.youWon) onVictory(battleRef.current || {});
+      else onDefeat(battleRef.current || {});
     };
     const onDeployReady = (ev: { matchId?: string }) => {
       if (ev.matchId !== matchId) return;
-      // Opponent locked deploy — keep waiting until battle_start
       setWaitingOpponent(true);
+    };
+    const onOppDisc = (ev: { matchId?: string; graceMs?: number }) => {
+      if (ev.matchId !== matchId) return;
+      setOpponentOffline(true);
+      setOfflineGraceUntil(Date.now() + (ev.graceMs || 60_000));
+    };
+    const onOppRec = (ev: { matchId?: string }) => {
+      if (ev.matchId !== matchId) return;
+      setOpponentOffline(false);
+      setOfflineGraceUntil(null);
+    };
+    const onRejoin = (ev: {
+      matchId?: string;
+      battle?: any;
+      status?: string;
+      turnDeadline?: number;
+      turnSide?: 'A' | 'B';
+      deployReady?: { self: boolean; opponent: boolean };
+    }) => {
+      if (ev.matchId !== matchId) return;
+      if (ev.battle) {
+        setBattle(ev.battle);
+        setPhase('play');
+        setWaitingOpponent(false);
+      } else if (ev.deployReady?.self && !ev.deployReady.opponent) {
+        setWaitingOpponent(true);
+      }
+      syncTurnMeta(ev);
     };
 
     sock.on('live:battle_start', onStart);
     sock.on('live:state', onState);
     sock.on('live:finished', onFinished);
     sock.on('live:deploy_ready', onDeployReady);
+    sock.on('live:opponent_disconnect', onOppDisc);
+    sock.on('live:opponent_reconnect', onOppRec);
+    sock.on('live:rejoin', onRejoin);
     return () => {
       sock.off('live:battle_start', onStart);
       sock.off('live:state', onState);
       sock.off('live:finished', onFinished);
       sock.off('live:deploy_ready', onDeployReady);
+      sock.off('live:opponent_disconnect', onOppDisc);
+      sock.off('live:opponent_reconnect', onOppRec);
+      sock.off('live:rejoin', onRejoin);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLiveDuel, deploy?.liveMatchId]);
@@ -483,7 +564,8 @@ export function MissionScreen({
   }) {
     if (!isLiveDuel || !deploy?.liveMatchId) return;
     connectRealtime().emit('live:turn', { matchId: deploy.liveMatchId, action }, (res: any) => {
-      if (res?.error) setPreview(String(res.error));
+      if (res?.error) setPreview(liveErrMsg(String(res.error)));
+      else if (res?.turnDeadline != null) syncTurnMeta(res);
     });
   }
 
@@ -517,13 +599,15 @@ export function MissionScreen({
   const recentLog = (battle?.log || []).slice(0, 3);
   const battlePhaseKey =
     phase === 'deploy'
-      ? 'battlePhaseDeploy'
+      ? waitingOpponent
+        ? 'livePvpWaitingDeploy'
+        : 'battlePhaseDeploy'
       : !active
         ? 'battlePhaseWait'
         : active.team === myTeam
           ? 'battlePhaseYourTurn'
           : isLiveDuel
-            ? 'battlePhaseOpponent'
+            ? 'livePvpWaitingOpponentTurn'
             : 'battlePhaseEnemy';
   const showBattleTip = phase === 'deploy' && !battleTipDismissed && !state.flags?.battleTipSeen;
 
@@ -740,6 +824,19 @@ export function MissionScreen({
           {phase === 'play' && active ? (
             <span className="muted battle-phase-unit">
               · {active.name} · {t('round')} {battle.round}
+              {isLiveDuel && turnSecondsLeft != null ? (
+                <span
+                  className={`battle-turn-timer ${isMyTurnSide && turnSecondsLeft <= 10 ? 'urgent' : ''}`}
+                >
+                  · {t('livePvpTurnTimer')}: {turnSecondsLeft}s
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+          {isLiveDuel && opponentOffline ? (
+            <span className="battle-offline-chip warn">
+              {t('livePvpOpponentOffline')}
+              {offlineGraceLeft != null ? ` (${offlineGraceLeft}s)` : ''}
             </span>
           ) : null}
         </div>
@@ -808,8 +905,6 @@ export function MissionScreen({
                       matchId: deploy.liveMatchId,
                       victory: false,
                     });
-                    liveDoneRef.current = true;
-                    onDefeat(battle);
                     return;
                   }
                   forfeitBattle(battle);
@@ -1021,8 +1116,6 @@ export function MissionScreen({
                   matchId: deploy.liveMatchId,
                   victory: false,
                 });
-                liveDoneRef.current = true;
-                onDefeat(battle);
                 return;
               }
               forfeitBattle(battle);
