@@ -1,0 +1,108 @@
+// The Forge War — players, sessions, cloud saves, PvP (PostgreSQL / Prisma 7)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Registered player (email+password and/or Google/Apple OAuth).
+model Player {
+  id            String             @id @default(cuid())
+  email         String             @unique
+  /// Null for OAuth-only accounts
+  passwordHash  String?
+  /// Password signups start false; OAuth with verified email is true
+  emailVerified Boolean            @default(false)
+  /// Public nickname
+  displayName   String?
+  /// Curated avatar p0–p4 or data-URL custom image
+  avatarKey     String?
+  /// Google `sub` claim
+  googleSub     String?            @unique
+  /// Apple `sub` claim
+  appleSub      String?            @unique
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  sessions      Session[]
+  save          GameSave?
+  pvpDefense    PvpDefense?
+  emailTokens   EmailVerifyToken[]
+  pvpAttacked   PvpMatch[]         @relation("PvpAttacker")
+  pvpDefended   PvpMatch[]         @relation("PvpDefender")
+}
+
+/// Opaque bearer session (raw token only returned at issue time).
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([playerId])
+}
+
+/// One-time email verification token (hash only stored).
+model EmailVerifyToken {
+  id        String   @id @default(cuid())
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([playerId])
+}
+
+/// Authenticated cloud campaign blob only (no anonymous guest saves).
+model GameSave {
+  id        String   @id @default(cuid())
+  playerId  String   @unique
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  /// Full game state as JSON string
+  data      String   @db.Text
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+}
+
+/// Async PvP: ghost squad defended by AI against attackers.
+model PvpDefense {
+  playerId    String   @id
+  player      Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  displayName String?
+  avatarKey   String?
+  /// Rough power for matchmaking filter
+  power       Int      @default(0)
+  /// JSON: { warriors, items } — built from server cloud save only
+  squadJson   String   @db.Text
+  wins        Int      @default(0)
+  losses      Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@index([power])
+  @@index([updatedAt])
+}
+
+/// Short-lived challenge required before a human PvP result counts.
+model PvpMatch {
+  id          String    @id @default(cuid())
+  attackerId  String
+  attacker    Player    @relation("PvpAttacker", fields: [attackerId], references: [id], onDelete: Cascade)
+  defenderId  String
+  defender    Player    @relation("PvpDefender", fields: [defenderId], references: [id], onDelete: Cascade)
+  /// open | resolved | expired
+  status      String    @default("open")
+  victory     Boolean?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  resolvedAt  DateTime?
+
+  @@index([attackerId, createdAt])
+  @@index([defenderId, createdAt])
+  @@index([status, expiresAt])
+}

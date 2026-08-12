@@ -1,0 +1,29 @@
+# Local Postgres for The Forge War API
+# Binds to localhost only — not reachable from other machines.
+#
+# Production: do NOT use this compose for internet Postgres.
+# Use managed DB with strong password, private network, SSL.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tfw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tfw}
+      # Override in .env for anything beyond single-dev laptop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tfw_local_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-tfw}
+    ports:
+      # Host-only bind — never 0.0.0.0 in shared environments
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - tfw_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tfw_pg_data:

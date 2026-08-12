@@ -1,0 +1,30 @@
+{
+  "name": "the-forge-war",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @tfw/web",
+    "dev:web": "npm run dev -w @tfw/web",
+    "dev:api": "npm run start:dev -w @tfw/api",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:push": "npm run db:push -w @tfw/api",
+    "db:migrate": "npm run db:migrate -w @tfw/api",
+    "build": "npm run build -w @tfw/game && npm run build -w @tfw/api && npm run build -w @tfw/web",
+    "start:web": "npm run start -w @tfw/web",
+    "start:api": "npm run start -w @tfw/api",
+    "db:bootstrap": "bash scripts/db-bootstrap.sh",
+    "db:deploy": "npm run db:deploy -w @tfw/api",
+    "db:backup": "bash scripts/backup-db.sh",
+    "prod:up": "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build",
+    "prod:down": "docker compose -f docker-compose.prod.yml --env-file .env.prod down",
+    "render:build": "npm ci && npm run build -w @tfw/api",
+    "render:start": "npm run db:deploy -w @tfw/api && npm run start:prod -w @tfw/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

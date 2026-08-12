@@ -1,0 +1,14 @@
+node_modules
+.dist
+dist
+.next
+.turbo
+*.log
+.env
+.env.local
+.env.prod
+apps/web/.next
+apps/api/dist
+packages/game/dist
+backups/
+*.dump

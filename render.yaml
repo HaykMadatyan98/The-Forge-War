@@ -1,0 +1,53 @@
+# Render Blueprint — API for The Forge War
+# Dashboard: New → Blueprint → connect this repo → select render.yaml
+#
+# After first deploy: copy the public URL (https://….onrender.com)
+# into Vercel as NEXT_PUBLIC_API_URL=https://….onrender.com/v1
+# and set WEB_ORIGIN / WEB_PUBLIC_URL to your Vercel URL, then Redeploy.
+
+services:
+  - type: web
+    name: tfw-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: .
+    buildCommand: npm ci --include=dev && npm run build -w @tfw/api
+    startCommand: npm run db:deploy -w @tfw/api && npm run start:prod -w @tfw/api
+    healthCheckPath: /v1/health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOW_DEV_EMAIL_TOKEN
+        value: "0"
+      - key: RETURN_AUTH_TOKEN
+        value: "0"
+      - key: COOKIE_SAMESITE
+        value: None
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: TRUST_PROXY
+        value: "1"
+      # Set REQUIRE_SMTP=1 after Resend/SMTP is filled
+      - key: REQUIRE_SMTP
+        value: "0"
+      - key: DATABASE_URL
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: WEB_PUBLIC_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false

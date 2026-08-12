@@ -1,0 +1,110 @@
+# Production stack: Postgres (private) + API + Web
+# Put secrets in .env.prod (never commit). Example keys in .env.prod.example
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# TLS: put Caddy (or Cloudflare) in front; this file exposes only web/api ports
+# bound to localhost unless you change ports.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tfw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tfw}
+    volumes:
+      - tfw_pg_data:/var/lib/postgresql/data
+    # No host ports — API joins network only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - internal
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tfw}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tfw}?schema=public
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN}
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-${WEB_ORIGIN}}
+      ALLOW_DEV_EMAIL_TOKEN: "0"
+      RETURN_AUTH_TOKEN: "0"
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-None}
+      COOKIE_SECURE: "1"
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      TRUST_PROXY: "1"
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURE: ${SMTP_SECURE:-0}
+      REQUIRE_SMTP: ${REQUIRE_SMTP:-1}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
+      APPLE_REDIRECT_URI: ${APPLE_REDIRECT_URI:-}
+    ports:
+      - "127.0.0.1:8787:8787"
+    networks:
+      - internal
+      - edge
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - edge
+
+  # Optional automatic daily dump (host must mount ./backups)
+  db-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-tfw}
+      POSTGRES_DB: ${POSTGRES_DB:-tfw}
+    volumes:
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          ts=$$(date -u +%Y%m%d_%H%M%S)
+          pg_dump -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "/backups/tfw_$$ts.dump"
+          # keep last 14 dumps
+          ls -1t /backups/tfw_*.dump 2>/dev/null | tail -n +15 | xargs -r rm -f
+          sleep 86400
+        done
+    networks:
+      - internal
+
+volumes:
+  tfw_pg_data:
+
+networks:
+  internal:
+    internal: true
+  edge:
