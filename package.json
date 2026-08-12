@@ -25,6 +25,6 @@
     "render:start": "npm run db:deploy -w @tfw/api && npm run start:prod -w @tfw/api"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.0"
   }
 }
