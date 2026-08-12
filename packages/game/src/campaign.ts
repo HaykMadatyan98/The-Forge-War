@@ -61,6 +61,35 @@ export function campaignProgress(state) {
   };
 }
 
+/** Group missions by region for collapsible campaign path UI. */
+export function campaignRegionsWithMissions(state) {
+  const progress = campaignProgress(state);
+  return REGIONS.map((region) => {
+    const missions = (region.missions || []).map((m) => ({
+      ...m,
+      regionId: region.id,
+      regionOrder: region.order,
+    }));
+    const clearedCount = missions.filter((m) => state.campaign?.cleared?.[m.id]).length;
+    const allCleared = clearedCount === missions.length && missions.length > 0;
+    const hasNext = missions.some((m) => progress.next?.id === m.id);
+    const unlocked = !region.unlockAfter || !!state.campaign?.cleared?.[region.unlockAfter]
+      || (state.campaign?.unlockedRegions || []).includes(region.id);
+    return {
+      id: region.id,
+      order: region.order,
+      missions,
+      clearedCount,
+      total: missions.length,
+      allCleared,
+      hasNext,
+      unlocked,
+      /** Default collapsed when fully cleared and not holding the next mission */
+      defaultCollapsed: allCleared && !hasNext,
+    };
+  });
+}
+
 export function ensureCampaignProgress(state) {
   if (!state.campaign) state.campaign = { cleared: {}, unlockedRegions: ['fields'] };
   if (!state.campaign.cleared) state.campaign.cleared = {};

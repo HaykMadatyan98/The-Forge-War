@@ -16,3 +16,4 @@ export * from './tournaments';
 export * from './dailies';
 export * from './liveBattle';
 export * from './onboarding';
+export * from './sparks';

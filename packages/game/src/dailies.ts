@@ -10,6 +10,8 @@ export type DailyQuestId =
   | 'daily_live'
   | 'daily_research';
 
+export type DailyTier = 'quick' | 'main';
+
 export type DailyQuestDef = {
   id: DailyQuestId;
   labelKey: string;
@@ -18,35 +20,41 @@ export type DailyQuestDef = {
   target: number;
   rewardGold: number;
   rewardSparks: number;
+  /** quick = short economy tasks; main = combat session goals */
+  tier: DailyTier;
 };
 
+/** 3 quick + 2 main — sized for 15–30 min sessions. */
 export const DAILY_QUESTS: DailyQuestDef[] = [
   {
     id: 'daily_mine',
     labelKey: 'dailyMine',
     detailKey: 'dailyMineDetail',
     tab: 'mine',
-    target: 3,
-    rewardGold: 25,
+    target: 2,
+    rewardGold: 20,
     rewardSparks: 1,
+    tier: 'quick',
   },
   {
     id: 'daily_craft',
     labelKey: 'dailyCraft',
     detailKey: 'dailyCraftDetail',
     tab: 'forge',
-    target: 2,
-    rewardGold: 30,
+    target: 1,
+    rewardGold: 25,
     rewardSparks: 1,
+    tier: 'quick',
   },
   {
     id: 'daily_smelt',
     labelKey: 'dailySmelt',
     detailKey: 'dailySmeltDetail',
     tab: 'mine',
-    target: 2,
-    rewardGold: 20,
+    target: 1,
+    rewardGold: 18,
     rewardSparks: 1,
+    tier: 'quick',
   },
   {
     id: 'daily_campaign',
@@ -54,17 +62,9 @@ export const DAILY_QUESTS: DailyQuestDef[] = [
     detailKey: 'dailyCampaignDetail',
     tab: 'campaign',
     target: 1,
-    rewardGold: 35,
-    rewardSparks: 1,
-  },
-  {
-    id: 'daily_pvp',
-    labelKey: 'dailyPvp',
-    detailKey: 'dailyPvpDetail',
-    tab: 'arena',
-    target: 2,
     rewardGold: 40,
     rewardSparks: 2,
+    tier: 'main',
   },
   {
     id: 'daily_live',
@@ -72,19 +72,17 @@ export const DAILY_QUESTS: DailyQuestDef[] = [
     detailKey: 'dailyLiveDetail',
     tab: 'arena',
     target: 1,
-    rewardGold: 45,
+    rewardGold: 50,
     rewardSparks: 2,
-  },
-  {
-    id: 'daily_research',
-    labelKey: 'dailyResearch',
-    detailKey: 'dailyResearchDetail',
-    tab: 'research',
-    target: 1,
-    rewardGold: 25,
-    rewardSparks: 1,
+    tier: 'main',
   },
 ];
+
+/** Legacy ids still accepted by bumpDaily so old call sites don't break. */
+const LEGACY_DAILY_ALIASES: Partial<Record<DailyQuestId, DailyQuestId>> = {
+  daily_pvp: 'daily_live',
+  daily_research: 'daily_craft',
+};
 
 function dailyBag(state: any) {
   if (!state.flags) state.flags = {};
@@ -109,10 +107,11 @@ function dailyBag(state: any) {
 }
 
 export function bumpDaily(state: any, id: DailyQuestId, amount = 1) {
+  const mapped = LEGACY_DAILY_ALIASES[id] || id;
   const d = dailyBag(state);
-  const def = DAILY_QUESTS.find((q) => q.id === id);
+  const def = DAILY_QUESTS.find((q) => q.id === mapped);
   if (!def) return;
-  d.progress[id] = Math.min(def.target, (d.progress[id] || 0) + amount);
+  d.progress[mapped] = Math.min(def.target, (d.progress[mapped] || 0) + amount);
 }
 
 export function dailyList(state: any) {
@@ -129,6 +128,15 @@ export function dailyList(state: any) {
       canClaim: done && !claimed,
     };
   });
+}
+
+export function dailyListByTier(state: any) {
+  const list = dailyList(state);
+  return {
+    quick: list.filter((q) => q.tier === 'quick'),
+    main: list.filter((q) => q.tier === 'main'),
+    list,
+  };
 }
 
 export function dailiesSummary(state: any) {

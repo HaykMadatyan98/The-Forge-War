@@ -14,6 +14,7 @@ export type MetricEvent =
   | 'live_pvp_disconnect'
   | 'live_pvp_action_rejected'
   | 'live_pvp_rejoin'
+  | 'live_pvp_rematch_offer'
   | 'save_conflict';
 
 export function logMetric(event: MetricEvent, data: Record<string, unknown> = {}) {

@@ -11,6 +11,7 @@ export const LIVE_TURN_MS = 55_000;
 export const RECONNECT_GRACE_MS = 60_000;
 export const RATING_MATCH_WINDOW = 200;
 export const RATING_MATCH_EXPANDED = 400;
+export const REMATCH_OFFER_MS = 30_000;
 
 export type LiveSquad = {
   warriors: unknown[];
@@ -96,6 +97,11 @@ export class LivePvpService implements OnModuleDestroy {
   private playerMatch = new Map<string, string>();
   private ratedMatches = new Set<string>();
   private turnTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private rematchOffers = new Map<
+    string,
+    { id: string; fromId: string; toId: string; expiresAt: number; timer?: ReturnType<typeof setTimeout> }
+  >();
+  private rematchByPlayer = new Map<string, string>();
   private broadcast: BroadcastFn | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
@@ -103,6 +109,11 @@ export class LivePvpService implements OnModuleDestroy {
   onModuleDestroy() {
     for (const t of this.turnTimers.values()) clearTimeout(t);
     this.turnTimers.clear();
+    for (const o of this.rematchOffers.values()) {
+      if (o.timer) clearTimeout(o.timer);
+    }
+    this.rematchOffers.clear();
+    this.rematchByPlayer.clear();
   }
 
   setBroadcast(fn: BroadcastFn) {
@@ -244,6 +255,7 @@ export class LivePvpService implements OnModuleDestroy {
       status: m.status,
       youWon: m.winnerId === playerId,
       rating,
+      opponentId: m.playerA === playerId ? m.playerB : m.playerA,
     };
   }
 
@@ -591,5 +603,142 @@ export class LivePvpService implements OnModuleDestroy {
     const mid = this.playerMatch.get(playerId);
     if (!mid) return null;
     return this.matches.get(mid) || null;
+  }
+
+  private clearRematchFor(playerId: string) {
+    const oid = this.rematchByPlayer.get(playerId);
+    if (!oid) return;
+    const offer = this.rematchOffers.get(oid);
+    if (offer?.timer) clearTimeout(offer.timer);
+    this.rematchOffers.delete(oid);
+    if (offer) {
+      this.rematchByPlayer.delete(offer.fromId);
+      this.rematchByPlayer.delete(offer.toId);
+    }
+  }
+
+  async offerRematch(fromId: string, toId: string) {
+    if (!toId || fromId === toId) return { ok: false as const, error: 'bad_opponent' };
+    if (this.playerMatch.has(fromId) || this.playerMatch.has(toId)) {
+      return { ok: false as const, error: 'busy' };
+    }
+    this.clearRematchFor(fromId);
+    this.clearRematchFor(toId);
+
+    const fromSquad = await this.loadDefense(fromId);
+    if (!fromSquad) return { ok: false as const, error: 'need_defense' };
+
+    const offerId = randomBytes(6).toString('hex');
+    const expiresAt = Date.now() + REMATCH_OFFER_MS;
+    const timer = setTimeout(() => {
+      const o = this.rematchOffers.get(offerId);
+      if (!o) return;
+      this.rematchOffers.delete(offerId);
+      this.rematchByPlayer.delete(o.fromId);
+      this.rematchByPlayer.delete(o.toId);
+      this.broadcast?.('live:rematch_expired', [o.fromId, o.toId], { offerId });
+    }, REMATCH_OFFER_MS);
+
+    this.rematchOffers.set(offerId, { id: offerId, fromId, toId, expiresAt, timer });
+    this.rematchByPlayer.set(fromId, offerId);
+    this.rematchByPlayer.set(toId, offerId);
+
+    this.broadcast?.('live:rematch_invite', [toId], {
+      offerId,
+      fromId,
+      from: {
+        displayName: fromSquad.displayName,
+        avatarKey: fromSquad.avatarKey,
+        power: fromSquad.power,
+        rating: fromSquad.rating,
+      },
+      expiresAt,
+      graceMs: REMATCH_OFFER_MS,
+    });
+
+    logMetric('live_pvp_rematch_offer', { offerId, fromId, toId });
+    return { ok: true as const, offerId, expiresAt, graceMs: REMATCH_OFFER_MS };
+  }
+
+  async respondRematch(playerId: string, offerId: string, accept: boolean) {
+    const offer = this.rematchOffers.get(offerId);
+    if (!offer || offer.toId !== playerId) return { ok: false as const, error: 'no_offer' };
+    if (offer.timer) clearTimeout(offer.timer);
+    this.rematchOffers.delete(offerId);
+    this.rematchByPlayer.delete(offer.fromId);
+    this.rematchByPlayer.delete(offer.toId);
+
+    if (!accept) {
+      this.broadcast?.('live:rematch_declined', [offer.fromId], { offerId, by: playerId });
+      return { ok: true as const, accepted: false as const };
+    }
+
+    this.queue = this.queue.filter((q) => q.playerId !== offer.fromId && q.playerId !== offer.toId);
+    const squadA = await this.loadDefense(offer.fromId);
+    const squadB = await this.loadDefense(offer.toId);
+    if (!squadA || !squadB) {
+      this.broadcast?.('live:rematch_declined', [offer.fromId], { offerId, by: playerId, reason: 'no_defense' });
+      return { ok: false as const, error: 'opponent_no_defense' };
+    }
+
+    const matchId = randomBytes(8).toString('hex');
+    const match: LiveMatch = {
+      id: matchId,
+      playerA: offer.fromId,
+      playerB: offer.toId,
+      createdAt: Date.now(),
+      status: 'deploy',
+      squadA,
+      squadB,
+      deployA: null,
+      deployB: null,
+      mode: 'duel',
+      disconnectedAt: {},
+      actionLog: [],
+    };
+    this.matches.set(matchId, match);
+    this.playerMatch.set(offer.fromId, matchId);
+    this.playerMatch.set(offer.toId, matchId);
+    logMetric('live_pvp_matched', {
+      matchId,
+      playerA: offer.fromId,
+      playerB: offer.toId,
+      mode: 'duel',
+      rematch: true,
+    });
+
+    const payloadA = {
+      matchId,
+      opponentId: offer.toId,
+      opponent: squadB,
+      youAre: 'A' as const,
+      mode: 'duel' as const,
+      rematch: true,
+    };
+    const payloadB = {
+      matchId,
+      opponentId: offer.fromId,
+      opponent: squadA,
+      youAre: 'B' as const,
+      mode: 'duel' as const,
+      rematch: true,
+    };
+    this.broadcast?.('live:matched', [offer.fromId], payloadA);
+    this.broadcast?.('live:matched', [offer.toId], payloadB);
+    return { ok: true as const, accepted: true as const, matchId };
+  }
+
+  cancelRematchOffer(playerId: string) {
+    const oid = this.rematchByPlayer.get(playerId);
+    if (!oid) return { ok: true as const };
+    const offer = this.rematchOffers.get(oid);
+    if (!offer) return { ok: true as const };
+    if (offer.timer) clearTimeout(offer.timer);
+    this.rematchOffers.delete(oid);
+    this.rematchByPlayer.delete(offer.fromId);
+    this.rematchByPlayer.delete(offer.toId);
+    const other = offer.fromId === playerId ? offer.toId : offer.fromId;
+    this.broadcast?.('live:rematch_declined', [other], { offerId: oid, by: playerId, cancelled: true });
+    return { ok: true as const };
   }
 }

@@ -293,6 +293,33 @@ h3 {
   border: 1px solid var(--line);
 }
 
+.account-avatar-wrap {
+  display: inline-flex;
+  border-radius: 50%;
+  padding: 2px;
+  box-sizing: content-box;
+  flex-shrink: 0;
+}
+
+.account-avatar-wrap .account-avatar {
+  border: none;
+}
+
+.avatar-frame-bronze {
+  background: linear-gradient(145deg, #c89858, #6a4820);
+  box-shadow: 0 0 0 1px #3a2810;
+}
+
+.avatar-frame-ember {
+  background: linear-gradient(145deg, #e07040, #7a2810);
+  box-shadow: 0 0 10px #e0704044;
+}
+
+.avatar-frame-mythril {
+  background: linear-gradient(145deg, #90b0d8, #385878);
+  box-shadow: 0 0 12px #90b0d844;
+}
+
 .avatar-picker {
   display: flex;
   flex-direction: column;
@@ -1028,14 +1055,16 @@ h3 {
   right: 0;
   bottom: 0;
   z-index: 20;
-  padding: 0.55rem 0.75rem calc(0.55rem + env(safe-area-inset-bottom));
-  gap: 0.5rem;
-  background: linear-gradient(180deg, transparent, #0e0c0af0 35%);
+  padding: 0.65rem 0.85rem calc(0.65rem + env(safe-area-inset-bottom));
+  gap: 0.55rem;
+  background: linear-gradient(180deg, transparent, #0e0c0af5 28%);
   border-top: 1px solid var(--line);
 }
 
 .battle-mobile-dock button {
   flex: 1;
+  min-height: 48px;
+  font-size: 0.95rem;
 }
 
 .hub-brand {
@@ -1134,6 +1163,214 @@ h3 {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.95rem 1rem;
+}
+
+.econ-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.econ-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 0.18rem 0.45rem;
+  border-radius: 4px;
+  border: 1px solid #ffffff22;
+  background: #0004;
+  color: var(--accent2);
+}
+
+.econ-card-blurb {
+  margin: 0.2rem 0 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #cbb89a;
+  opacity: 0.88;
+}
+
+.econ-card-eta {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.econ-stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.econ-card--extract {
+  border-color: #6a5438;
+  background:
+    linear-gradient(165deg, #2f2619f0, #16120cf5);
+}
+
+.econ-card--refine {
+  border-color: #4a5568;
+  background:
+    linear-gradient(165deg, #1e2430f2, #12161cf5);
+}
+
+.econ-card--craft {
+  border-color: #6a4a38;
+}
+
+.econ-card--line-metal.econ-card--extract {
+  box-shadow: inset 0 1px 0 #d4a57422, 0 10px 28px #0005;
+}
+
+.econ-card--line-wood.econ-card--extract {
+  border-color: #4a6a3a;
+  background:
+    linear-gradient(165deg, #24301ff0, #12180cf5);
+}
+
+.econ-card--line-leather.econ-card--extract {
+  border-color: #6a4a3a;
+  background:
+    linear-gradient(165deg, #30241ff0, #18120cf5);
+}
+
+.econ-card--ore .econ-kind-badge,
+.econ-card--bar .econ-kind-badge {
+  color: #e8b86a;
+  border-color: #e8b86a44;
+}
+
+.econ-card--coal .econ-kind-badge {
+  color: #9aa3b2;
+  border-color: #9aa3b244;
+}
+
+.econ-card--wood .econ-kind-badge,
+.econ-card--plank .econ-kind-badge {
+  color: #8fbf6a;
+  border-color: #8fbf6a44;
+}
+
+.econ-card--hide .econ-kind-badge,
+.econ-card--leather .econ-kind-badge,
+.econ-card--scale .econ-kind-badge {
+  color: #d4a07a;
+  border-color: #d4a07a44;
+}
+
+.econ-card--bar,
+.econ-card--plank,
+.econ-card--leather {
+  position: relative;
+}
+
+.econ-card--bar::before,
+.econ-card--plank::before,
+.econ-card--leather::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 3px;
+  border-radius: 12px 12px 0 0;
+  background: linear-gradient(90deg, #e8b86a88, transparent);
+  pointer-events: none;
+}
+
+.econ-card--plank::before {
+  background: linear-gradient(90deg, #8fbf6a88, transparent);
+}
+
+.econ-card--leather::before {
+  background: linear-gradient(90deg, #d4a07a88, transparent);
+}
+
+.refine-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  margin: 0.35rem 0 0.55rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  background: #0c101888;
+  border: 1px dashed #ffffff18;
+  font-size: 0.78rem;
+}
+
+.refine-flow-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.refine-flow-plus,
+.refine-flow-arrow {
+  opacity: 0.55;
+  font-weight: 700;
+}
+
+.refine-flow-out {
+  color: var(--good);
+  font-weight: 600;
+}
+
+.econ-btn-refine {
+  background: linear-gradient(180deg, #3a4558, #2a3344);
+  border: 1px solid #6a7a94;
+  color: #e8eef8;
+}
+
+.econ-btn-refine:disabled {
+  opacity: 0.45;
+}
+
+.econ-card--craft-weapon {
+  border-color: #8a5a3a;
+  background:
+    linear-gradient(165deg, #302018f2, #18120cf5);
+}
+
+.econ-card--craft-armor {
+  border-color: #4a5a6a;
+  background:
+    linear-gradient(165deg, #1c2430f2, #10141af5);
+}
+
+.econ-card--craft-offhand {
+  border-color: #5a6a4a;
+  background:
+    linear-gradient(165deg, #22281cf2, #12160cf5);
+}
+
+.econ-kind-badge--craft-weapon {
+  color: #e8a86a;
+  border-color: #e8a86a44;
+}
+
+.econ-kind-badge--craft-armor {
+  color: #8ab0d4;
+  border-color: #8ab0d444;
+}
+
+.econ-kind-badge--craft-offhand {
+  color: #a8c48a;
+  border-color: #a8c48a44;
+}
+
+.craft-btn--armor {
+  background: linear-gradient(180deg, #3a4a5a, #2a3444);
+  border-color: #6a8aa4;
+}
+
+.craft-btn--offhand {
+  background: linear-gradient(180deg, #3a4a38, #2a3428);
+  border-color: #6a8a5a;
 }
 
 .card h3 {
@@ -3019,4 +3256,304 @@ h3 {
 
 .live-pvp-status.bad {
   color: var(--bad);
+}
+
+.toast-stack {
+  position: fixed;
+  top: 0.85rem;
+  right: 0.85rem;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: min(360px, calc(100vw - 1.5rem));
+  pointer-events: none;
+}
+
+.toast-item {
+  pointer-events: none;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(224, 176, 80, 0.4);
+  background: #1a1510f2;
+  color: var(--text);
+  font-size: 0.88rem;
+  box-shadow: 0 10px 28px #0007;
+}
+
+.spark-chip-btn {
+  cursor: pointer;
+  border-color: rgba(224, 176, 80, 0.35) !important;
+}
+
+.spark-chip-btn:hover {
+  border-color: var(--accent2) !important;
+  color: var(--text);
+}
+
+.spark-shop-sheet {
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.spark-shop-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.spark-shop-panel-head h3 {
+  margin: 0;
+}
+
+.spark-shop-slot-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.rematch-invite-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 55;
+  width: min(520px, calc(100vw - 1.5rem));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--accent2);
+  background: #1c1610f5;
+  box-shadow: 0 16px 40px #0008;
+}
+
+.rematch-invite-main {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.campaign-region {
+  margin-bottom: 0.55rem;
+}
+
+.campaign-region-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.35rem;
+  background: #1a1510;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.campaign-region-head.has-next {
+  border-color: rgba(224, 176, 80, 0.4);
+}
+
+.campaign-region-head.cleared {
+  opacity: 0.85;
+}
+
+.campaign-region-toggle {
+  width: 1rem;
+  color: var(--accent2);
+}
+
+.quests-tier-title {
+  margin: 0.85rem 0 0.45rem;
+  font-size: 0.95rem;
+}
+
+.econ-cta-block {
+  margin-bottom: 0.65rem;
+}
+
+.econ-cta-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.4rem;
+  border-radius: 10px;
+  border: 1px solid rgba(122, 173, 86, 0.35);
+  background: rgba(40, 56, 28, 0.22);
+}
+
+@media (max-width: 900px) {
+  .battle-wrap--play {
+    grid-template-columns: 1fr;
+  }
+
+  .battle-wrap--play .battle-side {
+    display: none;
+  }
+
+  .battle-wrap--play .battle-stage {
+    min-height: calc(100dvh - 8rem);
+  }
+
+  .toast-stack {
+    top: auto;
+    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+    right: 0.65rem;
+    left: 0.65rem;
+    width: auto;
+  }
+
+  .rematch-invite-banner {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+.live-pvp-card {
+  margin-bottom: 1rem;
+}
+
+.live-pvp-card.is-searching {
+  border-color: rgba(224, 176, 80, 0.45);
+}
+
+.live-pvp-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.45rem;
+}
+
+.live-pvp-card-head h3 {
+  margin: 0;
+}
+
+.live-pvp-rating-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  font-size: 0.82rem;
+}
+
+.live-pvp-status {
+  font-size: 0.82rem;
+  margin-bottom: 0.45rem;
+}
+
+.live-pvp-idle-hint {
+  font-size: 0.82rem;
+  margin: 0 0 0.25rem;
+}
+
+.live-pvp-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  background: rgba(20, 16, 12, 0.45);
+  margin-bottom: 0.35rem;
+}
+
+.live-pvp-search-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+}
+
+.live-pvp-search-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #1a1510;
+  border: 1px solid var(--line-soft);
+  overflow: hidden;
+  margin-top: 0.2rem;
+}
+
+.live-pvp-search-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8a5a28, var(--accent2));
+}
+
+.live-pvp-matched {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(122, 173, 86, 0.35);
+  background: rgba(40, 56, 28, 0.25);
+}
+
+.slot-buy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  border: 1px dashed var(--line-soft);
+  background: rgba(26, 20, 14, 0.35);
+}
+
+.slot-buy-row .muted {
+  font-size: 0.78rem;
+  max-width: 50%;
+}
+
+.spark-shop .frame-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.55rem;
+}
+
+.frame-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.65rem 0.5rem;
+  background: #1a1510;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.frame-pick.on {
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+@media (max-width: 900px) {
+  .battle-phase-strip {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    backdrop-filter: blur(8px);
+  }
+
+  .battle-turn-timer {
+    font-weight: 650;
+  }
+
+  .battle-offline-chip {
+    display: block;
+    margin: 0.35rem 0 0;
+  }
 }

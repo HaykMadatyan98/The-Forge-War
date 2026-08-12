@@ -268,7 +268,39 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       status: match.status,
       youWon: match.winnerId === playerId,
       rating,
+      opponentId: match.playerA === playerId ? match.playerB : match.playerA,
     };
+  }
+
+  @SubscribeMessage('live:rematch_offer')
+  async onRematchOffer(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { opponentId?: string },
+  ) {
+    const playerId = client.playerId;
+    if (!playerId) return { error: 'unauthorized' };
+    const res = await this.livePvp.offerRematch(playerId, String(body?.opponentId || ''));
+    if (!res.ok) return { error: res.error };
+    return res;
+  }
+
+  @SubscribeMessage('live:rematch_respond')
+  async onRematchRespond(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { offerId?: string; accept?: boolean },
+  ) {
+    const playerId = client.playerId;
+    if (!playerId) return { error: 'unauthorized' };
+    const res = await this.livePvp.respondRematch(playerId, String(body?.offerId || ''), !!body?.accept);
+    if (!res.ok) return { error: res.error };
+    return res;
+  }
+
+  @SubscribeMessage('live:rematch_cancel')
+  onRematchCancel(@ConnectedSocket() client: AuthedSocket) {
+    const playerId = client.playerId;
+    if (!playerId) return { error: 'unauthorized' };
+    return this.livePvp.cancelRematchOffer(playerId);
   }
 
   @SubscribeMessage('live:action')

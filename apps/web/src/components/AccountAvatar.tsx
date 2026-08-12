@@ -27,24 +27,32 @@ export function AccountAvatar({
   name,
   size = 48,
   className = '',
+  frame = 'none',
 }: {
   avatarKey?: string | null;
   name?: string;
   size?: number;
   className?: string;
+  frame?: string;
 }) {
   const src = avatarSrc(avatarKey);
+  const frameClass = frame && frame !== 'none' ? `avatar-frame-${frame}` : '';
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={name || ''}
-      width={size}
-      height={size}
-      className={`account-avatar ${className}`.trim()}
+    <span
+      className={`account-avatar-wrap ${frameClass} ${className}`.trim()}
       style={{ width: size, height: size }}
-      draggable={false}
-    />
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={name || ''}
+        width={size}
+        height={size}
+        className="account-avatar"
+        style={{ width: size, height: size }}
+        draggable={false}
+      />
+    </span>
   );
 }
 

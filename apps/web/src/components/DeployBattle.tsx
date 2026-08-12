@@ -813,7 +813,7 @@ export function MissionScreen({
   }
 
   return (
-    <div className="battle-wrap">
+    <div className={`battle-wrap ${phase === 'play' ? 'battle-wrap--play' : 'battle-wrap--deploy'}`}>
       <div className="battle-stage">
         <div className="battle-phase-strip" aria-live="polite">
           <span className={`battle-phase-chip ${phase === 'deploy' ? 'active' : ''}`}>{t('battlePhaseDeploy')}</span>
@@ -1016,70 +1016,8 @@ export function MissionScreen({
             ) : null}
           </div>
         ) : (
-          <div>
-            <h3>{t('squad')}</h3>
-            {hover ? (
-              <div className="card" style={{ padding: '0.5rem 0.65rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                <b>
-                  [{hover.x}, {hover.y}]
-                </b>
-                <div className="muted">{describeTile(hover) || '—'}</div>
-              </div>
-            ) : (
-              <p className="muted" style={{ fontSize: '0.82rem' }}>
-                {t('tileHint')}
-              </p>
-            )}
-            <div className="unit-list">
-              {battle.units
-                .filter((u: any) => u.team === myTeam || (u.team !== myTeam && u.hp > 0))
-                .map((u: any) => {
-                  const pct = Math.round((u.hp / u.maxHp) * 100);
-                  const isAct = active && active.id === u.id;
-                  return (
-                    <div className={`unit-pill ${isAct ? 'active' : ''}`} key={u.id}>
-                      <div className="row">
-                        <IconWeapon type={u.weaponType} s={18} />
-                        <b>{u.name}</b>
-                      </div>
-                      <div className="muted" style={{ fontSize: '0.75rem' }}>
-                        {u.team === 'enemy' ? t('enemyTurn') : t('squad')} · {t(u.weaponType)} · {t('hp')}{' '}
-                        {u.hp}/{u.maxHp}
-                      </div>
-                      <div className="hpbar">
-                        <i
-                          style={{
-                            width: `${pct}%`,
-                            background: u.team === 'enemy' ? 'var(--bad)' : 'var(--good)',
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-        )}
-        <div>
-          <h3>{phase === 'deploy' ? t('foesLabel') : t('log')}</h3>
-          {phase === 'deploy' ? (
-            <div className="unit-list">
-              {battle.units
-                .filter((u: any) => u.team === 'enemy')
-                .map((u: any) => (
-                  <div className="unit-pill" key={u.id}>
-                    <div className="row">
-                      <IconWeapon type={u.weaponType} s={18} />
-                      <b>{u.name}</b>
-                    </div>
-                    <div className="muted" style={{ fontSize: '0.75rem' }}>
-                      {t(u.weaponType)} · {t('hp')} {u.hp}/{u.maxHp}
-                      {u.isBoss ? ` · ${t('boss')}` : ''}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          ) : (
+          <div className="battle-side-play">
+            <h3>{t('log')}</h3>
             <div className="battle-log">
               {(battle.log || []).slice(0, 12).map((line: string, i: number) => (
                 <div key={i} className="muted" style={{ fontSize: '0.78rem' }}>
@@ -1087,8 +1025,29 @@ export function MissionScreen({
                 </div>
               ))}
             </div>
-          )}
+          </div>
+        )}
+        {phase === 'deploy' ? (
+        <div>
+          <h3>{t('foesLabel')}</h3>
+          <div className="unit-list">
+            {battle.units
+              .filter((u: any) => u.team === 'enemy')
+              .map((u: any) => (
+                <div className="unit-pill" key={u.id}>
+                  <div className="row">
+                    <IconWeapon type={u.weaponType} s={18} />
+                    <b>{u.name}</b>
+                  </div>
+                  <div className="muted" style={{ fontSize: '0.75rem' }}>
+                    {t(u.weaponType)} · {t('hp')} {u.hp}/{u.maxHp}
+                    {u.isBoss ? ` · ${t('boss')}` : ''}
+                  </div>
+                </div>
+              ))}
+          </div>
         </div>
+        ) : null}
       </div>
       {phase === 'play' ? (
         <div className="battle-mobile-dock">

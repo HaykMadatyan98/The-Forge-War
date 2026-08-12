@@ -12,6 +12,7 @@ import {
   rosterCap,
 } from './state';
 import { forgeSlotsUsed, mineSlotsUsed } from './jobs';
+import { effectiveForgeSlots, effectiveMineSlots } from './sparks';
 
 /** Hub destinations the player can jump to from a hint. */
 export type HubGuideTab =
@@ -42,7 +43,7 @@ function canResearchAffordable(state) {
 }
 
 function canCraftSomething(state) {
-  if (forgeSlotsUsed(state) >= (state.forge?.slots || 1)) return false;
+  if (forgeSlotsUsed(state) >= effectiveForgeSlots(state)) return false;
   for (const id of state.research?.unlocked || []) {
     const bp = BLUEPRINTS[id];
     if (!bp) continue;
@@ -52,7 +53,7 @@ function canCraftSomething(state) {
 }
 
 function mineHasFreeSlots(state) {
-  return mineSlotsUsed(state) < (state.mine?.slots || 1);
+  return mineSlotsUsed(state) < effectiveMineSlots(state);
 }
 
 function needsEquipUpgrade(state) {
@@ -161,8 +162,8 @@ export function hubNextSteps(state, limit = 3): HubGuideStep[] {
       labelKey: 'guideMine',
       detailKey: 'guideMineDetail',
       meta: {
-        free: (state.mine?.slots || 1) - mineSlotsUsed(state),
-        slots: state.mine?.slots || 1,
+        free: effectiveMineSlots(state) - mineSlotsUsed(state),
+        slots: effectiveMineSlots(state),
       },
     });
   } else if ((state.mine?.jobs?.length || 0) > 0) {

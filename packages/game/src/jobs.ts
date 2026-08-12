@@ -16,16 +16,19 @@ import {
   spendEnergy,
   tickEnergy,
 } from './energy';
+import { effectiveForgeSlots, effectiveMineSlots } from './sparks';
 
 function freeMineSlot(state) {
   const used = new Set(state.mine.jobs.map((j) => j.slot));
-  for (let i = 0; i < state.mine.slots; i++) if (!used.has(i)) return i;
+  const slots = effectiveMineSlots(state);
+  for (let i = 0; i < slots; i++) if (!used.has(i)) return i;
   return -1;
 }
 
 function freeForgeSlot(state) {
   const used = new Set(state.forge.jobs.map((j) => j.slot));
-  for (let i = 0; i < state.forge.slots; i++) if (!used.has(i)) return i;
+  const slots = effectiveForgeSlots(state);
+  for (let i = 0; i < slots; i++) if (!used.has(i)) return i;
   return -1;
 }
 

@@ -63,6 +63,7 @@ import {
 } from '@/lib/api';
 import { mountGoogleButton, signInWithApple } from '@/lib/oauthClient';
 import { IconGold, IconRes, IconSpark, Portrait } from './icons';
+import { SparkShopPanel } from './SparkShopPanel';
 import { AccountAvatar, AvatarPicker } from './AccountAvatar';
 import {
   BarracksView,
@@ -89,7 +90,15 @@ export function GameShell() {
   const [screen, setScreen] = useState<Screen>('boot');
   const [hubTab, setHubTab] = useState<HubTab>('campaign');
   const [state, setState] = useState<any>(null);
-  const [msg, setMsg] = useState('');
+  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
+  const toastIdRef = useRef(0);
+  const [sparkShopOpen, setSparkShopOpen] = useState(false);
+  const [rematchInvite, setRematchInvite] = useState<{
+    offerId: string;
+    fromId: string;
+    from?: { displayName?: string; avatarKey?: string | null; power?: number; rating?: number };
+    expiresAt: number;
+  } | null>(null);
   const [battle, setBattle] = useState<any>(null);
   const [deploy, setDeploy] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
@@ -110,6 +119,7 @@ export function GameShell() {
   const [profileAvatar, setProfileAvatar] = useState('p0');
   const [pvpMatchId, setPvpMatchId] = useState<string | null>(null);
   const [liveMatchId, setLiveMatchId] = useState<string | null>(null);
+  const [autoLiveQueue, setAutoLiveQueue] = useState(false);
   const [pvpDeploy, setPvpDeploy] = useState<{ ids: string[]; positions: { x: number; y: number }[] } | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [resetToken, setResetToken] = useState('');
@@ -118,6 +128,8 @@ export function GameShell() {
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const [, tick] = useState(0);
   const liveRatingRef = useRef<{ before: number; after: number; delta: number } | null>(null);
+  const lastLiveOpponentRef = useRef<string | null>(null);
+  const rematchWaitRef = useRef<number | null>(null);
   const screenRef = useRef(screen);
   const deployRef = useRef(deploy);
   screenRef.current = screen;
@@ -168,8 +180,7 @@ export function GameShell() {
             setProfileNick(res.player.displayName || '');
             setProfileAvatar(res.player.avatarKey || 'p0');
             setBootStep('menu');
-            setMsg(t('authEmailVerified'));
-            setTimeout(() => setMsg(''), 2800);
+            flash(t('authEmailVerified'));
             try {
               const cloud = await pullSave();
               if (cloud?.save && typeof cloud.save === 'object') writeSave(cloud.save as any);
@@ -181,8 +192,7 @@ export function GameShell() {
             window.history.replaceState({}, '', qs ? `?${qs}` : window.location.pathname);
           })
           .catch(() => {
-            setMsg(t('authVerifyFail'));
-            setTimeout(() => setMsg(''), 2800);
+            flash(t('authVerifyFail'));
           });
       }
     } catch {
@@ -203,14 +213,11 @@ export function GameShell() {
         const parts: string[] = [];
         for (const d of done) {
           if (d.kind === 'mine') {
-            const eta = d.duration ? ` · ${formatEta(d.duration)}` : '';
-            parts.push(`${t('jobDoneMine')} +${d.amount}${eta}`);
+            parts.push(`${t('jobDoneMine')} +${d.amount} ${t(d.resource)}`);
           } else if (d.kind === 'smelt') {
-            const eta = d.duration ? ` · ${formatEta(d.duration)}` : '';
-            parts.push(`${t('jobDoneSmelt')} +${d.amount}${eta}`);
+            parts.push(`${t('jobDoneSmelt')} +${d.amount} ${t(d.resource)}`);
           } else if (d.kind === 'craft') {
-            const eta = d.duration ? ` · ${formatEta(d.duration)}` : '';
-            parts.push(`${t('jobDoneCraft')} (${t(d.rarity)})${eta}`);
+            parts.push(`${t('jobDoneCraft')} ${t(d.blueprintId)} (${t(d.rarity)})`);
           } else if (d.kind === 'research') {
             parts.push(`${t('jobDoneResearch')} ${t(d.blueprintId)}`);
             if (d.unlockedResources?.length) {
@@ -240,8 +247,11 @@ export function GameShell() {
   }, [state]);
 
   function flash(m: string) {
-    setMsg(m);
-    setTimeout(() => setMsg(''), 2800);
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev.slice(-2), { id, text: m }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3200);
   }
 
   function persist(s: any) {
@@ -626,6 +636,7 @@ export function GameShell() {
 
     const onFinished = (ev: LiveFinishedEvent) => {
       if (ev.rating) liveRatingRef.current = ev.rating;
+      if (ev.opponentId) lastLiveOpponentRef.current = ev.opponentId;
     };
 
     const onRejoin = (ev: LiveRejoinEvent) => {
@@ -653,11 +664,39 @@ export function GameShell() {
       });
     };
 
+    const onRematchInvite = (ev: {
+      offerId: string;
+      fromId: string;
+      from?: { displayName?: string; avatarKey?: string | null; power?: number; rating?: number };
+      expiresAt: number;
+    }) => {
+      setRematchInvite(ev);
+      flash(t('livePvpRematchInvite'));
+      setHubTab('arena');
+      setScreen('hub');
+    };
+
+    const onRematchExpired = () => {
+      setRematchInvite(null);
+      flash(t('livePvpRematchExpired'));
+    };
+
+    const onRematchDeclined = () => {
+      setRematchInvite(null);
+      flash(t('livePvpRematchDeclined'));
+    };
+
     sock.on('live:finished', onFinished);
     sock.on('live:rejoin', onRejoin);
+    sock.on('live:rematch_invite', onRematchInvite);
+    sock.on('live:rematch_expired', onRematchExpired);
+    sock.on('live:rematch_declined', onRematchDeclined);
     return () => {
       sock.off('live:finished', onFinished);
       sock.off('live:rejoin', onRejoin);
+      sock.off('live:rematch_invite', onRematchInvite);
+      sock.off('live:rematch_expired', onRematchExpired);
+      sock.off('live:rematch_declined', onRematchDeclined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player?.id]);
@@ -735,6 +774,13 @@ export function GameShell() {
       res.summary = buildBattleSummary(state, b, {}, []);
     }
     const sum = res.summary || buildBattleSummary(state, b, res.rewards || {}, res.unlocked || []);
+    if (isLiveDuel) {
+      sum.isLive = true;
+      sum.liveRematch = true;
+      sum.opponentId = lastLiveOpponentRef.current || deploy?.opponentId || null;
+      sum.opponentName = sum.opponentName || deploy?.opponentName;
+      sum.opponentAvatar = sum.opponentAvatar || deploy?.opponentAvatar;
+    }
     if (liveRatingRef.current) {
       sum.rating = liveRatingRef.current;
       markPvpRating(state, liveRatingRef.current.after);
@@ -747,13 +793,39 @@ export function GameShell() {
     setScreen('summary');
   }
 
-  function leaveSummary(goto: 'hub' | 'next') {
+  function leaveSummary(goto: 'hub' | 'next' | 'rematch') {
     const sum = summary;
     const difficulty = sum?.difficulty || 'normal';
     const nextId = sum?.nextMissionId as string | undefined;
     const isPvp = sum?.kind === 'pvp' || sum?.missionId === 'pvp_arena';
     const hasLevel = state?.warriors?.some((w: any) => (w.freePoints || 0) > 0);
     setSummary(null);
+
+    if (goto === 'rematch') {
+      const opponentId = sum?.opponentId || lastLiveOpponentRef.current;
+      setHubTab('arena');
+      setScreen('hub');
+      if (opponentId) {
+        connectRealtime().emit('live:rematch_offer', { opponentId }, (res: any) => {
+          if (res?.error) {
+            flash(t('livePvpRematchFallback'));
+            setAutoLiveQueue(true);
+            return;
+          }
+          flash(t('livePvpRematchWaiting'));
+          if (rematchWaitRef.current) window.clearTimeout(rematchWaitRef.current);
+          rematchWaitRef.current = window.setTimeout(() => {
+            rematchWaitRef.current = null;
+            connectRealtime().emit('live:rematch_cancel');
+            flash(t('livePvpRematchFallback'));
+            setAutoLiveQueue(true);
+          }, 31_000);
+        });
+      } else {
+        setAutoLiveQueue(true);
+      }
+      return;
+    }
 
     if (goto === 'next' && nextId && !isPvp) {
       if (hasLevel) {
@@ -1129,6 +1201,7 @@ export function GameShell() {
         state={state}
         onContinue={() => leaveSummary('hub')}
         onNextMission={summary.nextMissionId ? () => leaveSummary('next') : undefined}
+        onRematch={summary.liveRematch ? () => leaveSummary('rematch') : undefined}
         onGoTab={(tab) => {
           setSummary(null);
           if (tab === 'levelup') {
@@ -1210,7 +1283,16 @@ export function GameShell() {
           <span className="resource-chip res-chip-ico">
             <IconGold s={18} /> <b>{state.gold}</b>
           </span>
-          <span className="resource-chip res-chip-ico">
+          <span
+            className="resource-chip res-chip-ico spark-chip-btn"
+            role="button"
+            tabIndex={0}
+            onClick={() => setSparkShopOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') setSparkShopOpen(true);
+            }}
+            title={t('sparkShopTitle')}
+          >
             <IconSpark s={18} /> <b>{state.sparks}</b>
           </span>
           {resChips.map((k: string) => (
@@ -1219,8 +1301,16 @@ export function GameShell() {
               <b>{state.resources[k] || 0}</b>
             </span>
           ))}
-          {msg ? <span className="warn">{msg}</span> : null}
         </div>
+        {toasts.length ? (
+          <div className="toast-stack" aria-live="polite">
+            {toasts.map((toast) => (
+              <div className="toast-item" key={toast.id}>
+                {toast.text}
+              </div>
+            ))}
+          </div>
+        ) : null}
         {freePts.length ? (
           <div className="hub-banner">
             <span>
@@ -1285,8 +1375,14 @@ export function GameShell() {
               state={state}
               player={player}
               flash={flash}
+              autoLiveQueue={autoLiveQueue}
+              onAutoLiveQueueConsumed={() => setAutoLiveQueue(false)}
               onAttack={(op) => void beginPvp(op)}
               onLiveMatch={(ev: LiveMatchedEvent) => {
+                if (rematchWaitRef.current) {
+                  window.clearTimeout(rematchWaitRef.current);
+                  rematchWaitRef.current = null;
+                }
                 if (!ev.opponent?.warriors?.length) {
                   flash(t('pvpDefenseNeed'));
                   return;
@@ -1356,7 +1452,12 @@ export function GameShell() {
                   <h2>{t('profileTab')}</h2>
                   <p className="muted">{player.email}</p>
                 </div>
-                <AccountAvatar avatarKey={profileAvatar} name={profileNick || '?'} size={72} />
+                <AccountAvatar
+                  avatarKey={profileAvatar}
+                  name={profileNick || '?'}
+                  size={72}
+                  frame={state.cosmetics?.frame || 'none'}
+                />
               </div>
               <label className="boot-field" style={{ maxWidth: 360 }}>
                 <span>{t('authNick')}</span>
@@ -1374,6 +1475,18 @@ export function GameShell() {
               <button type="button" className="primary" style={{ marginTop: 12 }} onClick={() => void saveProfile()}>
                 {t('profileSave')}
               </button>
+
+              <div className="card spark-shop" style={{ marginTop: '1.25rem' }}>
+                <SparkShopPanel
+                  state={state}
+                  avatarKey={profileAvatar}
+                  refresh={() => {
+                    persist(state);
+                    setState({ ...state });
+                  }}
+                  flash={flash}
+                />
+              </div>
             </div>
           ) : null}
         </div>
@@ -1387,6 +1500,72 @@ export function GameShell() {
           setState({ ...state });
         }}
       />
+      {sparkShopOpen ? (
+        <div className="hub-sheet-backdrop" onClick={() => setSparkShopOpen(false)} role="presentation">
+          <div className="hub-sheet spark-shop-sheet" onClick={(e) => e.stopPropagation()}>
+            <SparkShopPanel
+              state={state}
+              avatarKey={profileAvatar}
+              onClose={() => setSparkShopOpen(false)}
+              refresh={() => {
+                persist(state);
+                setState({ ...state });
+              }}
+              flash={flash}
+            />
+          </div>
+        </div>
+      ) : null}
+      {rematchInvite ? (
+        <div className="rematch-invite-banner">
+          <div className="rematch-invite-main">
+            <AccountAvatar
+              avatarKey={rematchInvite.from?.avatarKey}
+              name={rematchInvite.from?.displayName || '?'}
+              size={40}
+              frame={state.cosmetics?.frame || 'none'}
+            />
+            <div>
+              <b>{t('livePvpRematchInvite')}</b>
+              <div className="muted" style={{ fontSize: '0.82rem' }}>
+                {rematchInvite.from?.displayName || rematchInvite.fromId.slice(0, 8)}
+                {rematchInvite.from?.rating != null ? ` · ${t('pvpRating')} ${rematchInvite.from.rating}` : ''}
+              </div>
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                connectRealtime().emit(
+                  'live:rematch_respond',
+                  { offerId: rematchInvite.offerId, accept: true },
+                  (res: any) => {
+                    setRematchInvite(null);
+                    if (res?.error) flash(res.error);
+                  },
+                );
+              }}
+            >
+              {t('livePvpRematchAccept')}
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                connectRealtime().emit('live:rematch_respond', {
+                  offerId: rematchInvite.offerId,
+                  accept: false,
+                });
+                setRematchInvite(null);
+              }}
+            >
+              {t('livePvpRematchDecline')}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1396,12 +1575,14 @@ function BattleSummaryView({
   state,
   onContinue,
   onNextMission,
+  onRematch,
   onGoTab,
 }: {
   summary: any;
   state?: any;
   onContinue: () => void;
   onNextMission?: () => void;
+  onRematch?: () => void;
   onGoTab?: (tab: string) => void;
 }) {
   const win = summary.result === 'victory';
@@ -1576,14 +1757,20 @@ function BattleSummaryView({
               {summary.nextMissionId ? `: ${t(summary.nextMissionId)}` : ''}
             </button>
           ) : null}
+          {onRematch ? (
+            <button type="button" className="primary" style={{ width: '100%' }} onClick={onRematch}>
+              {t('livePvpRematch')}
+            </button>
+          ) : null}
           <button
             type="button"
-            className={win && onNextMission ? 'ghost' : 'primary'}
+            className={win && onNextMission ? 'ghost' : onRematch ? 'ghost' : 'primary'}
             style={{ width: '100%' }}
             onClick={onContinue}
           >
             {hasLevelUps && !onNextMission ? t('levelUp') : t('continueHub')}
           </button>
+          {onRematch ? <p className="muted" style={{ textAlign: 'center', fontSize: '0.82rem' }}>{t('livePvpRematchHint')}</p> : null}
         </div>
       </div>
     </div>

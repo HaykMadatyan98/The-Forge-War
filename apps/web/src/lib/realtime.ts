@@ -63,6 +63,7 @@ export type LiveFinishedEvent = {
   status?: string;
   youWon: boolean;
   rating?: { before: number; after: number; delta: number } | null;
+  opponentId?: string;
 };
 
 export type LiveStateEvent = {

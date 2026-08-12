@@ -271,7 +271,8 @@ export function freeWeaponCount(state) {
 }
 
 export function canCraftWeapon(state) {
-  if (forgeSlotsUsedSafe(state) >= (state.forge?.slots || 1)) return false;
+  const slots = Math.min(6, (state.forge?.slots || 1) + (state.forge?.boughtSlots || 0));
+  if (forgeSlotsUsedSafe(state) >= slots) return false;
   for (const id of state.research?.unlocked || []) {
     const bp = BLUEPRINTS[id];
     if (!bp || bp.slot !== 'weapon') continue;
@@ -431,6 +432,10 @@ export function migrateState(state) {
   if (!state.flags.quests) state.flags.quests = { done: {}, claimed: {} };
   if (state.sparks == null) state.sparks = 0;
   if (state.flags.loopSeen == null) state.flags.loopSeen = !!state.campaign?.cleared && Object.keys(state.campaign.cleared).length > 0;
+  if (!state.cosmetics) state.cosmetics = { frames: ['none'], frame: 'none' };
+  if (!Array.isArray(state.cosmetics.frames)) state.cosmetics.frames = ['none'];
+  if (state.mine && state.mine.boughtSlots == null) state.mine.boughtSlots = 0;
+  if (state.forge && state.forge.boughtSlots == null) state.forge.boughtSlots = 0;
   ensureEnergy(state);
   tickEnergy(state);
   ensureCampaignProgress(state);

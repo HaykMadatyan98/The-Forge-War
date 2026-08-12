@@ -36,6 +36,7 @@ import {
   addResource,
   allMissionsInOrder,
   campaignProgress,
+  campaignRegionsWithMissions,
   isMissionUnlocked,
   missionEtaMinutes,
   missionRewardPreview,
@@ -79,12 +80,18 @@ import {
   questsSummary,
   claimQuestReward,
   syncQuestObjectives,
-  dailyList,
+  dailyListByTier,
   claimDailyReward,
   bumpDaily,
   TOURNAMENT_MOCKS,
   canEnterTournament,
   markPvpRating,
+  buyEconomySlot,
+  effectiveMineSlots,
+  effectiveForgeSlots,
+  SPARK_SLOT_COST,
+  SPARK_SLOT_MAX_TOTAL,
+  liveMatchWindow,
 } from '@tfw/game';
 import { fetchMyPvp, fetchPvpLadder, fetchPvpOpponents, type PvpLadderRow, type PvpOpponent, type PublicPlayer } from '@/lib/api';
 import {
@@ -100,6 +107,53 @@ import { AccountAvatar } from './AccountAvatar';
 import { FancySelect, StatGrid, SubTabs, CostList } from './ui';
 import { GearIcon } from './gearArt';
 import { UnitModel } from './UnitModel';
+
+function resourceCardKind(id: string): 'ore' | 'coal' | 'wood' | 'hide' | 'scale' | 'bar' | 'plank' | 'leather' {
+  if (id === 'coal') return 'coal';
+  if (id.endsWith('_ore')) return 'ore';
+  if (id.endsWith('_bar')) return 'bar';
+  if (id.endsWith('_plank')) return 'plank';
+  if (id.endsWith('_leather')) return 'leather';
+  if (id.endsWith('_scale') || id === 'wyrm_scale') return 'scale';
+  if (id.endsWith('_hide') || id === 'scrap_hide') return 'hide';
+  if (['softwood', 'hardwood', 'ashwood', 'ironwood', 'yew'].includes(id)) return 'wood';
+  return 'ore';
+}
+
+function resourceLineOf(id: string): 'metal' | 'wood' | 'leather' {
+  const k = resourceCardKind(id);
+  if (k === 'wood' || k === 'plank') return 'wood';
+  if (k === 'hide' || k === 'scale' || k === 'leather') return 'leather';
+  return 'metal';
+}
+
+function mineActionLabel(kind: ReturnType<typeof resourceCardKind>) {
+  if (kind === 'wood') return t('mineActionChop');
+  if (kind === 'hide' || kind === 'scale') return t('mineActionHunt');
+  if (kind === 'coal') return t('mineActionDigCoal');
+  return t('mineActionDig');
+}
+
+function refineActionLabel(kind: ReturnType<typeof resourceCardKind>) {
+  if (kind === 'plank') return t('refineActionSaw');
+  if (kind === 'leather') return t('refineActionTan');
+  return t('refineActionSmelt');
+}
+
+function forgeCraftKind(bp: any): 'weapon' | 'offhand' | 'armor' | 'gear' {
+  if (bp.slot === 'weapon') return 'weapon';
+  if (bp.slot === 'offhand' || bp.weaponType === 'shield') return 'offhand';
+  if (bp.slot === 'helm' || bp.slot === 'body' || bp.slot === 'legs') return 'armor';
+  return 'gear';
+}
+
+function forgeCraftLabel(bp: any) {
+  const kind = forgeCraftKind(bp);
+  if (kind === 'weapon') return t('craftWeapon');
+  if (kind === 'offhand') return t('craftOffhand');
+  if (kind === 'armor') return t('craftArmorPiece');
+  return t('craft');
+}
 
 function EnergyLine({ cost, state }: { cost: number; state: any }) {
   tickEnergy(state);
@@ -203,14 +257,11 @@ function trySkipJob(
     const parts: string[] = [];
     for (const d of done) {
       if (d.kind === 'mine') {
-        const eta = d.duration ? ` · ${formatEta(d.duration)}` : '';
-        parts.push(`${t('jobDoneMine')} +${d.amount}${eta}`);
+        parts.push(`${t('jobDoneMine')} +${d.amount} ${t(d.resource)}`);
       } else if (d.kind === 'smelt') {
-        const eta = d.duration ? ` · ${formatEta(d.duration)}` : '';
-        parts.push(`${t('jobDoneSmelt')} +${d.amount}${eta}`);
+        parts.push(`${t('jobDoneSmelt')} +${d.amount} ${t(d.resource)}`);
       } else if (d.kind === 'craft') {
-        const eta = d.duration ? ` · ${formatEta(d.duration)}` : '';
-        parts.push(`${t('jobDoneCraft')} (${t(d.rarity)})${eta}`);
+        parts.push(`${t('jobDoneCraft')} ${t(d.blueprintId)} (${t(d.rarity)})`);
       } else if (d.kind === 'research') parts.push(`${t('jobDoneResearch')} ${t(d.blueprintId)}`);
     }
     if (parts.length) flash(`${t('skipWithSparks')} −${res.cost} · ${parts.join(' · ')}`);
@@ -253,9 +304,73 @@ function SkipSparkBtn({
   );
 }
 
+function SlotBuyRow({
+  domain,
+  state,
+  refresh,
+  flash,
+}: {
+  domain: 'mine' | 'forge';
+  state: any;
+  refresh: () => void;
+  flash: (m: string) => void;
+}) {
+  const slots = domain === 'mine' ? effectiveMineSlots(state) : effectiveForgeSlots(state);
+  const used = domain === 'mine' ? mineSlotsUsed(state) : forgeSlotsUsed(state);
+  const free = Math.max(0, slots - used);
+  const atCap = slots >= SPARK_SLOT_MAX_TOTAL;
+  const can = (state.sparks || 0) >= SPARK_SLOT_COST && !atCap;
+  return (
+    <div className="econ-cta-block">
+      {free > 0 ? (
+        <div className="econ-cta-primary">
+          <b>{t('econFreeSlots').replace('{n}', String(free))}</b>
+          <span className="muted">{domain === 'mine' ? t('econFreeSlotsMine') : t('econFreeSlotsForge')}</span>
+        </div>
+      ) : (
+        <div className="econ-cta-primary muted">
+          <b>{t('noSlot')}</b>
+        </div>
+      )}
+      <div className="slot-buy-row">
+        <span className="muted">{t('sparksHint')}</span>
+        <button
+          type="button"
+          className={can ? 'primary' : 'ghost'}
+          disabled={!can}
+          onClick={() => {
+            const res = buyEconomySlot(state, domain);
+            if (!res.ok) {
+              if (res.err === 'no_sparks') flash(`${t('noSparks')} (${SPARK_SLOT_COST})`);
+              else if (res.err === 'max_slots') flash(t('buySlotMax'));
+              else flash(res.err || 'err');
+              return;
+            }
+            flash(`${t('buySlotOk')}: ${res.slots}/${SPARK_SLOT_MAX_TOTAL}`);
+            refresh();
+          }}
+        >
+          <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <IconSpark s={14} />
+            {domain === 'mine' ? t('buySlotMine') : t('buySlotForge')} · {SPARK_SLOT_COST}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function CampaignView({ state, onFight }: { state: any; onFight: (id: string, d: string) => void }) {
   const progress = campaignProgress(state);
-  const missions = allMissionsInOrder();
+  const regions = campaignRegionsWithMissions(state);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    for (const r of regions) init[r.id] = r.defaultCollapsed;
+    return init;
+  });
+
+  let missionIndex = 0;
+
   return (
     <>
       <div className="panel-header">
@@ -298,58 +413,84 @@ export function CampaignView({ state, onFight }: { state: any; onFight: (id: str
 
       <h3 className="section-title">{t('campaignPath')}</h3>
       <div className="campaign-path">
-        {missions.map((m: any, i: number) => {
-          const cleared = !!state.campaign.cleared[m.id];
-          const open = isMissionUnlocked(state, m.id);
-          const isNext = progress.next?.id === m.id;
+        {regions.map((region) => {
+          const isCollapsed = !!collapsed[region.id];
+          const startIndex = missionIndex;
+          missionIndex += region.missions.length;
           return (
-            <div className="mission-row" key={m.id}>
-              <div className="mission-rail" aria-hidden>
-                {i > 0 ? <span className="mission-rail-seg mission-rail-seg-top" /> : null}
-                <span
-                  className={`mission-dot ${cleared ? 'cleared' : ''} ${isNext ? 'current' : ''} ${!open ? 'locked' : ''}`}
-                />
-                {i < missions.length - 1 ? <span className="mission-rail-seg mission-rail-seg-bot" /> : null}
-              </div>
-              <div
-                className={`card mission-node ${cleared ? 'cleared' : ''} ${isNext ? 'current' : ''} ${!open ? 'locked-card' : ''}`}
+            <div className="campaign-region" key={region.id}>
+              <button
+                type="button"
+                className={`campaign-region-head ${region.hasNext ? 'has-next' : ''} ${region.allCleared ? 'cleared' : ''}`}
+                onClick={() => setCollapsed((c) => ({ ...c, [region.id]: !c[region.id] }))}
               >
-                <div className="mission-node-body">
-                  <div className="mission-node-main">
-                    <div className="mission-node-title">
-                      <span className="mission-index muted">{i + 1}.</span>
-                      <b>{t(m.id)}</b>
-                      {m.boss ? <span className="badge">{t('boss')}</span> : null}
-                      {cleared ? (
-                        <span className="badge badge-good">✓ {t('campaignCleared')}</span>
-                      ) : open ? (
-                        <span className="badge">{t('campaignAvailable')}</span>
-                      ) : (
-                        <span className="badge">{t('campaignLocked')}</span>
-                      )}
-                      {open ? (
-                        <span className="mission-eta-pill muted">
-                          {t('campaignEta').replace('{n}', String(missionEtaMinutes(m)))}
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="muted mission-node-sub">
-                      {t(m.regionId)} · {t('foesLabel')} {m.enemies} · Lv{m.enemyLvl}
-                    </p>
-                    {open && !cleared ? (
-                      <p className="mission-node-blurb">{t(`intro_${m.id}`)}</p>
-                    ) : null}
-                    {cleared ? (
-                      <p className="muted mission-node-blurb">{t(`outro_${m.id}`)}</p>
-                    ) : null}
-                  </div>
-                  {open ? (
-                    <MissionFight mission={m} onFight={onFight} primary={isNext} showRewards />
-                  ) : (
-                    <span className="muted mission-locked-hint">{t('campaignLocked')}</span>
-                  )}
-                </div>
-              </div>
+                <span className="campaign-region-toggle" aria-hidden>
+                  {isCollapsed ? '▸' : '▾'}
+                </span>
+                <b>{t(region.id)}</b>
+                <span className="muted">
+                  {region.clearedCount}/{region.total}
+                  {region.allCleared ? ` · ${t('campaignCleared')}` : ''}
+                </span>
+              </button>
+              {!isCollapsed
+                ? region.missions.map((m: any, localI: number) => {
+                    const i = startIndex + localI;
+                    const cleared = !!state.campaign.cleared[m.id];
+                    const open = isMissionUnlocked(state, m.id);
+                    const isNext = progress.next?.id === m.id;
+                    return (
+                      <div className="mission-row" key={m.id}>
+                        <div className="mission-rail" aria-hidden>
+                          <span className="mission-rail-seg mission-rail-seg-top" />
+                          <span
+                            className={`mission-dot ${cleared ? 'cleared' : ''} ${isNext ? 'current' : ''} ${!open ? 'locked' : ''}`}
+                          />
+                          <span className="mission-rail-seg mission-rail-seg-bot" />
+                        </div>
+                        <div
+                          className={`card mission-node ${cleared ? 'cleared' : ''} ${isNext ? 'current' : ''} ${!open ? 'locked-card' : ''}`}
+                        >
+                          <div className="mission-node-body">
+                            <div className="mission-node-main">
+                              <div className="mission-node-title">
+                                <span className="mission-index muted">{i + 1}.</span>
+                                <b>{t(m.id)}</b>
+                                {m.boss ? <span className="badge">{t('boss')}</span> : null}
+                                {cleared ? (
+                                  <span className="badge badge-good">✓ {t('campaignCleared')}</span>
+                                ) : open ? (
+                                  <span className="badge">{t('campaignAvailable')}</span>
+                                ) : (
+                                  <span className="badge">{t('campaignLocked')}</span>
+                                )}
+                                {open ? (
+                                  <span className="mission-eta-pill muted">
+                                    {t('campaignEta').replace('{n}', String(missionEtaMinutes(m)))}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="muted mission-node-sub">
+                                {t(m.regionId)} · {t('foesLabel')} {m.enemies} · Lv{m.enemyLvl}
+                              </p>
+                              {open && !cleared ? (
+                                <p className="mission-node-blurb">{t(`intro_${m.id}`)}</p>
+                              ) : null}
+                              {cleared ? (
+                                <p className="muted mission-node-blurb">{t(`outro_${m.id}`)}</p>
+                              ) : null}
+                            </div>
+                            {open ? (
+                              <MissionFight mission={m} onFight={onFight} primary={isNext} showRewards />
+                            ) : (
+                              <span className="muted mission-locked-hint">{t('campaignLocked')}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                : null}
             </div>
           );
         })}
@@ -427,7 +568,7 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
   tickEnergy(state);
   const def = MINE_BRANCHES[branch];
   const used = mineSlotsUsed(state);
-  const maxSlots = state.mine.slots;
+  const maxSlots = effectiveMineSlots(state);
   const free = Math.max(0, maxSlots - used);
 
   const branchStock = [...def.mine, ...def.smelt.map((id: string) => SMELT_RECIPES[id]?.output).filter(Boolean)];
@@ -448,6 +589,7 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
           ))}
         </div>
       </div>
+      <SlotBuyRow domain="mine" state={state} refresh={refresh} flash={flash} />
       <EnergyRestorePanel state={state} refresh={refresh} flash={flash} />
       <SubTabs
         active={branch}
@@ -500,33 +642,48 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
           );
         })}
       </div>
-      <h3 style={{ marginTop: '1rem' }}>{t('startMine')}</h3>
+      <h3 style={{ marginTop: '1rem' }}>{t('sectionExtract')}</h3>
       <div className="grid-cards">
         {def.mine.map((r) => {
           const open = isResourceUnlocked(state, r);
           const yieldAmt = mineYieldAmount(state, r);
           const prog = mineNodeProgress(state, r);
+          const kind = resourceCardKind(r);
+          const line = resourceLineOf(r);
           return (
-            <div className={`card ${open ? '' : 'locked-card'}`} key={r}>
+            <div
+              className={`card econ-card econ-card--extract econ-card--${kind} econ-card--line-${line} ${open ? '' : 'locked-card'}`}
+              key={r}
+            >
+              <div className="econ-card-top">
+                <span className={`econ-kind-badge econ-kind-badge--${kind}`}>{t(`resKind_${kind}`)}</span>
+                <span className="muted econ-card-eta">{formatEta(mineJobDurationMs(r))}</span>
+              </div>
               <div className="card-title-row">
                 <IconRes id={r} s={28} />
                 <h3>{t(r)}</h3>
               </div>
+              <p className="econ-card-blurb">{t(`resBlurb_${kind}`)}</p>
               {open ? (
                 <>
-                  <div className="muted">
-                    {t('nodeLevel')} Lv {prog.level}
-                    {prog.level < 10 ? ` · ${t('xpToNext')} ${prog.into}/${prog.need}` : ''}
+                  <div className="econ-stat-row">
+                    <span>
+                      {t('nodeLevel')} <b>Lv {prog.level}</b>
+                    </span>
+                    {prog.level < 10 ? (
+                      <span className="muted">
+                        {t('xpToNext')} {prog.into}/{prog.need}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="progress progress-thin" style={{ margin: '0.35rem 0' }}>
                     <i style={{ width: `${Math.round(prog.pct * 100)}%` }} />
                   </div>
                   <div className="yield-line">
                     {t('mineYield')}: <b>+{yieldAmt}</b>
-                    <span className="muted"> · {formatEta(mineJobDurationMs(r))}</span>
                   </div>
                   <div className="muted">
-                    {t('stockLine')}: {state.resources[r] || 0}
+                    {t('extractStock')}: {state.resources[r] || 0}
                   </div>
                   <div style={{ marginTop: 4 }}>
                     <EnergyLine cost={energyCostForMine(r)} state={state} />
@@ -549,7 +706,7 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
                       }
                     }}
                   >
-                    {t('startMine')} (+{yieldAmt})
+                    {mineActionLabel(kind)} (+{yieldAmt})
                   </button>
                 </>
               ) : (
@@ -559,26 +716,37 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
           );
         })}
       </div>
-      <h3 style={{ marginTop: '1rem' }}>{t('refining')}</h3>
+      <h3 style={{ marginTop: '1rem' }}>{t('sectionRefine')}</h3>
       <div className="grid-cards">
         {def.smelt.map((id) => {
           const recipe = SMELT_RECIPES[id];
           if (!recipe) return null;
           const open =
             isResourceUnlocked(state, recipe.output) || isResourceUnlocked(state, Object.keys(recipe.input)[0]);
+          const kind = resourceCardKind(recipe.output);
+          const line = resourceLineOf(recipe.output);
           return (
-            <div className={`card ${open ? '' : 'locked-card'}`} key={id}>
+            <div
+              className={`card econ-card econ-card--refine econ-card--${kind} econ-card--line-${line} ${open ? '' : 'locked-card'}`}
+              key={id}
+            >
+              <div className="econ-card-top">
+                <span className={`econ-kind-badge econ-kind-badge--${kind}`}>{t(`resKind_${kind}`)}</span>
+                <span className="muted econ-card-eta">{formatEta(recipe.seconds * 1000)}</span>
+              </div>
               <div className="card-title-row">
                 <IconRes id={recipe.output} s={28} />
                 <h3>{t(recipe.output)}</h3>
               </div>
+              <p className="econ-card-blurb">{t(`resBlurb_${kind}`)}</p>
               {open ? (
                 <>
-                  <div className="muted">
-                    {t('stockLine')}: <b>{state.resources[recipe.output] || 0}</b>
-                  </div>
                   <div className="yield-line">
-                    {t('smeltOut')}: <b>+{recipe.amount}</b> {t(recipe.output)}
+                    {t('smeltOut')}: <b>+{recipe.amount}</b>
+                    <span className="muted"> · {formatEta(recipe.seconds * 1000)}</span>
+                  </div>
+                  <div className="muted">
+                    {t('refinedStock')}: <b>{state.resources[recipe.output] || 0}</b>
                   </div>
                   <CostList state={state} cost={recipe.input} />
                   <div style={{ marginTop: 4 }}>
@@ -586,6 +754,7 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
                   </div>
                   <button
                     type="button"
+                    className="econ-btn-refine"
                     style={{ marginTop: '0.5rem' }}
                     disabled={!hasMats(state, recipe.input) || free <= 0 || !hasEnergy(state, energyCostForSmelt(id))}
                     onClick={() => {
@@ -606,7 +775,7 @@ export function MineView({ state, refresh, flash }: { state: any; refresh: () =>
                       }
                     }}
                   >
-                    {t('refining')}
+                    {refineActionLabel(kind)}
                   </button>
                 </>
               ) : (
@@ -626,7 +795,7 @@ export function ForgeView({ state, refresh, flash }: { state: any; refresh: () =
   tickEnergy(state);
   const list = Object.values(BLUEPRINTS).filter((bp: any) => bp.branch === branch);
   const used = forgeSlotsUsed(state);
-  const maxSlots = state.forge.slots;
+  const maxSlots = effectiveForgeSlots(state);
   const free = Math.max(0, maxSlots - used);
   const branchProg = forgeBranchProgress(state, branch);
 
@@ -646,6 +815,7 @@ export function ForgeView({ state, refresh, flash }: { state: any; refresh: () =
           ))}
         </div>
       </div>
+      <SlotBuyRow domain="forge" state={state} refresh={refresh} flash={flash} />
       <EnergyRestorePanel state={state} refresh={refresh} flash={flash} />
       <SubTabs
         active={branch}
@@ -699,34 +869,56 @@ export function ForgeView({ state, refresh, flash }: { state: any; refresh: () =
         {list.map((bp: any) => {
           const open = state.research.unlocked.includes(bp.id);
           const profile = bp.weaponType ? WEAPON_PROFILES[bp.weaponType] : null;
+          const craftKind = forgeCraftKind(bp);
           return (
-            <div className={`card ${open ? '' : 'locked-card'}`} key={bp.id}>
+            <div
+              className={`card econ-card econ-card--craft econ-card--craft-${craftKind} ${open ? '' : 'locked-card'}`}
+              key={bp.id}
+            >
+              <div className="econ-card-top">
+                <span className={`econ-kind-badge econ-kind-badge--craft-${craftKind}`}>
+                  {t(`craftKind_${craftKind}`)}
+                </span>
+                <span className="muted econ-card-eta">T{bp.tier}</span>
+              </div>
               <div className="card-title-row">
                 <GearIcon blueprintId={bp.id} weaponType={bp.weaponType} slot={bp.slot} s={40} />
                 <h3>{t(bp.id)}</h3>
               </div>
+              <p className="econ-card-blurb">{t(`craftBlurb_${craftKind}`)}</p>
               <div className="muted">
-                {open ? t('unlocked') : t('locked')} · T{bp.tier}
+                {open ? t('unlocked') : t('locked')}
                 {bp.weaponType ? ` · ${t(bp.weaponType)}` : ` · ${t(bp.slot)}`}
               </div>
               {bp.base ? <GearBonusLine base={bp.base} /> : null}
-              {profile ? (
+              {craftKind === 'weapon' && profile ? (
                 <div className="muted gear-profile">
                   {t('rangeLabel')}: {profile.rangeMin}–{profile.rangeMax}
-                  {profile.hands === 2 ? ` · ${t('hands2h')}` : ''}
+                  {profile.hands === 2 ? ` · ${t('hands2h')}` : ` · ${t('hands1h')}`}
+                </div>
+              ) : null}
+              {craftKind === 'armor' ? (
+                <div className="muted gear-profile">
+                  {t('armorSlotLabel')}: {t(bp.slot)}
+                </div>
+              ) : null}
+              {craftKind === 'offhand' && profile ? (
+                <div className="muted gear-profile">
+                  {t('blockFocus')}
+                  {profile.block ? ` · ×${profile.block}` : ''}
                 </div>
               ) : null}
               {open ? <CostList state={state} cost={bp.cost || {}} /> : <p className="muted">{t('lockedByResearch')}</p>}
               {open ? (
                 <div className="muted" style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                  {t('craftEta')}: ~{formatEta(craftJobDurationMs(bp))} · T{bp.tier}
+                  {t('craftEta')}: ~{formatEta(craftJobDurationMs(bp))}
                   {' · '}
                   <EnergyLine cost={energyCostForCraft(bp.id)} state={state} />
                 </div>
               ) : null}
               <button
                 type="button"
-                className="primary"
+                className={`primary craft-btn craft-btn--${craftKind}`}
                 style={{ marginTop: '0.5rem' }}
                 disabled={!open || !hasMats(state, bp.cost) || free <= 0 || !hasEnergy(state, energyCostForCraft(bp.id))}
                 onClick={() => {
@@ -748,7 +940,7 @@ export function ForgeView({ state, refresh, flash }: { state: any; refresh: () =
                   }
                 }}
               >
-                {t('craft')}
+                {forgeCraftLabel(bp)}
               </button>
             </div>
           );
@@ -1432,7 +1624,7 @@ export function QuestsView({
   syncQuestObjectives(state);
   const summary = questsSummary(state);
   const list = questList(state);
-  const dailies = dailyList(state);
+  const { quick, main, list: dailies } = dailyListByTier(state);
   const pct = Math.round((summary.pct || 0) * 100);
   const dailyClaimable = dailies.filter((q) => q.canClaim).length;
   const storyClaimable = list.filter((q) => q.canClaim).length;
@@ -1486,10 +1678,11 @@ export function QuestsView({
       {section === 'daily' ? (
         <div className="quests-section">
           <p className="muted quests-section-hint">
-            {t('dailiesHint')} · {dailyDone}/{dailies.length}
+            {t('dailiesHintSplit')} · {dailyDone}/{dailies.length}
           </p>
+          <h3 className="quests-tier-title">{t('dailiesQuick')}</h3>
           <ul className="quest-rows">
-            {dailies.map((q) => (
+            {quick.map((q) => (
               <li
                 key={q.id}
                 className={`quest-row ${q.done ? 'is-done' : ''} ${q.canClaim ? 'is-claimable' : ''}`}
@@ -1500,6 +1693,53 @@ export function QuestsView({
                       {q.claimed ? '✓' : q.done ? '●' : '○'}
                     </span>
                     <b>{t(q.labelKey)}</b>
+                    <span className="badge">{t('dailiesQuickBadge')}</span>
+                  </div>
+                  <p className="muted quest-row-detail">{t(q.detailKey)}</p>
+                  <div className="quest-row-meta">
+                    <span className="quest-row-progress">
+                      {q.progress}/{q.target}
+                    </span>
+                    <span className="muted">{rewardLine(q.rewardGold, q.rewardSparks)}</span>
+                  </div>
+                  <div className="quest-row-bar" aria-hidden>
+                    <i style={{ width: `${Math.round((q.progress / Math.max(1, q.target)) * 100)}%` }} />
+                  </div>
+                </div>
+                <div className="quest-row-action">
+                  <QuestAction
+                    canClaim={q.canClaim}
+                    claimed={q.claimed}
+                    done={q.done}
+                    onGo={() => goTab(q.tab)}
+                    onClaim={() => {
+                      const res = claimDailyReward(state, q.id);
+                      if (!res.ok) {
+                        flash(res.err || 'err');
+                        return;
+                      }
+                      refresh();
+                      flash(`+${res.gold} ${t('gold')}${res.sparks ? ` · +${res.sparks} ${t('sparks')}` : ''}`);
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+          <h3 className="quests-tier-title">{t('dailiesMain')}</h3>
+          <ul className="quest-rows">
+            {main.map((q) => (
+              <li
+                key={q.id}
+                className={`quest-row ${q.done ? 'is-done' : ''} ${q.canClaim ? 'is-claimable' : ''}`}
+              >
+                <div className="quest-row-main">
+                  <div className="quest-row-title">
+                    <span className="quest-row-mark" aria-hidden>
+                      {q.claimed ? '✓' : q.done ? '●' : '○'}
+                    </span>
+                    <b>{t(q.labelKey)}</b>
+                    <span className="badge badge-good">{t('dailiesMainBadge')}</span>
                   </div>
                   <p className="muted quest-row-detail">{t(q.detailKey)}</p>
                   <div className="quest-row-meta">
@@ -1598,6 +1838,8 @@ export function PvpView({
   onAttack,
   onPostDefense,
   onLiveMatch,
+  autoLiveQueue = false,
+  onAutoLiveQueueConsumed,
 }: {
   state: any;
   player: PublicPlayer | null;
@@ -1612,6 +1854,8 @@ export function PvpView({
   }) => void;
   onPostDefense: () => Promise<void> | void;
   onLiveMatch?: (ev: LiveMatchedEvent) => void;
+  autoLiveQueue?: boolean;
+  onAutoLiveQueueConsumed?: () => void;
 }) {
   const [mode, setMode] = useState<'players' | 'ai' | 'ladder' | 'cups'>('players');
   const [opponents, setOpponents] = useState<PvpOpponent[]>([]);
@@ -1631,6 +1875,7 @@ export function PvpView({
   const [liveMatch, setLiveMatch] = useState<LiveMatchedEvent | null>(null);
   const [rtStatus, setRtStatus] = useState<RealtimeStatus | null>(null);
   const [queueStartedAt, setQueueStartedAt] = useState<number | null>(null);
+  const [queueNow, setQueueNow] = useState(Date.now());
   const myPower = extractDefenseSquad(state).power || 0;
   const myRating = mine?.rating ?? 1000;
   const defenseStale =
@@ -1714,6 +1959,12 @@ export function PvpView({
     return () => window.clearTimeout(id);
   }, [liveStatus, queueStartedAt, flash]);
 
+  useEffect(() => {
+    if (liveStatus !== 'queued') return;
+    const id = window.setInterval(() => setQueueNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [liveStatus]);
+
   function liveStatusLabel() {
     if (!rtStatus) return t('livePvpStatusDisconnected');
     if (rtStatus.reconnecting) return t('livePvpStatusReconnecting');
@@ -1753,6 +2004,17 @@ export function PvpView({
       },
     );
   }
+
+  useEffect(() => {
+    if (!autoLiveQueue || !player || !mine) return;
+    if (liveStatus !== 'idle') {
+      onAutoLiveQueueConsumed?.();
+      return;
+    }
+    onAutoLiveQueueConsumed?.();
+    joinLiveQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLiveQueue, player?.id, !!mine]);
 
   async function postDefense() {
     setPosting(true);
@@ -1816,41 +2078,77 @@ export function PvpView({
       </div>
 
       {player ? (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3>{t('livePvp') || 'Live PvP'}</h3>
-          <p className="muted">{t('livePvpHintDuel')}</p>
-          <p className="muted" style={{ fontSize: '0.82rem' }}>
-            {t('livePvpFightHint')}
-          </p>
+        <div className={`card live-pvp-card ${liveStatus === 'queued' ? 'is-searching' : ''}`}>
+          <div className="live-pvp-card-head">
+            <div>
+              <h3>{t('livePvp')}</h3>
+              <p className="muted">{t('livePvpHintDuel')}</p>
+            </div>
+            <div className="live-pvp-rating-chip">
+              <span className="muted">{t('livePvpYourRating')}</span>
+              <b>{myRating}</b>
+            </div>
+          </div>
           <div
             className={`live-pvp-status ${rtStatus?.connected ? 'ok' : rtStatus?.connecting || rtStatus?.reconnecting ? 'warn' : 'bad'}`}
-            style={{ fontSize: '0.82rem', marginBottom: '0.5rem' }}
           >
             {liveStatusLabel()}
             {rtStatus?.lastError && !rtStatus.connected ? (
               <span className="muted"> · {rtStatus.lastError}</span>
             ) : null}
           </div>
+
+          {liveStatus === 'queued' && queueStartedAt ? (
+            <div className="live-pvp-search">
+              <div className="live-pvp-search-row">
+                <span className="muted">{t('livePvpSearchElapsed')}</span>
+                <b>{Math.floor((queueNow - queueStartedAt) / 1000)}s</b>
+                <span className="muted">/ {Math.floor(LIVE_QUEUE_TIMEOUT_MS / 1000)}s</span>
+              </div>
+              <div className="live-pvp-search-row">
+                <span className="muted">{t('livePvpMatchWindow')}</span>
+                <b>{t(liveMatchWindow(queueNow - queueStartedAt).labelKey)}</b>
+              </div>
+              <div className="live-pvp-search-bar" aria-hidden>
+                <i
+                  style={{
+                    width: `${Math.min(100, ((queueNow - queueStartedAt) / LIVE_QUEUE_TIMEOUT_MS) * 100)}%`,
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="muted live-pvp-idle-hint">{t('livePvpFightHint')}</p>
+          )}
+
           {liveMatch ? (
-            <p>
-              {t('livePvpOpponent') || 'Opponent'}:{' '}
-              <b>{liveMatch.opponent?.displayName || `${liveMatch.opponentId.slice(0, 8)}…`}</b>
-              {liveMatch.opponent?.power ? (
-                <span className="muted">
-                  {' '}
-                  · {t('pvpPower')} {liveMatch.opponent.power}
-                </span>
-              ) : null}
-            </p>
+            <div className="live-pvp-matched">
+              <AccountAvatar
+                avatarKey={liveMatch.opponent?.avatarKey}
+                name={liveMatch.opponent?.displayName || '?'}
+                size={40}
+              />
+              <div>
+                <div className="muted">{t('livePvpOpponent')}</div>
+                <b>{liveMatch.opponent?.displayName || `${liveMatch.opponentId.slice(0, 8)}…`}</b>
+                <div className="muted" style={{ fontSize: '0.82rem' }}>
+                  {liveMatch.opponent?.rating != null ? `${t('pvpRating')} ${liveMatch.opponent.rating}` : null}
+                  {liveMatch.opponent?.power != null
+                    ? `${liveMatch.opponent?.rating != null ? ' · ' : ''}${t('pvpPower')} ${liveMatch.opponent.power}`
+                    : null}
+                </div>
+              </div>
+            </div>
           ) : null}
-          <div className="row" style={{ gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+
+          <div className="row" style={{ gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="primary"
               disabled={liveStatus === 'queued'}
               onClick={joinLiveQueue}
             >
-              {liveStatus === 'queued' ? t('livePvpSearching') || 'Searching…' : t('livePvpJoin') || 'Find match'}
+              {liveStatus === 'queued' ? t('livePvpSearching') : t('livePvpJoin')}
             </button>
             {!rtStatus?.connected ? (
               <button type="button" className="ghost" onClick={() => reconnectRealtime()}>
@@ -1868,7 +2166,7 @@ export function PvpView({
                   setQueueStartedAt(null);
                 }}
               >
-                {t('cancel') || 'Cancel'}
+                {t('cancel')}
               </button>
             ) : null}
           </div>
