@@ -2,7 +2,7 @@
  * Fail-fast production configuration checks.
  */
 import { isProduction } from '../auth/session-cookie';
-import { allowDevEmailToken } from '../auth/mail';
+import { allowDevEmailToken, isMailConfigured } from '../auth/mail';
 
 export function assertProductionConfig() {
   if (!isProduction()) return;
@@ -39,9 +39,9 @@ export function assertProductionConfig() {
     errors.push('Dev email tokens must be disabled in production');
   }
 
-  if (!process.env.SMTP_HOST?.trim() && process.env.REQUIRE_SMTP !== '0') {
+  if (!isMailConfigured() && process.env.REQUIRE_SMTP !== '0') {
     errors.push(
-      'SMTP_HOST is required in production for email verification (set REQUIRE_SMTP=0 only for emergency)',
+      'RESEND_API_KEY or SMTP_HOST is required in production (set REQUIRE_SMTP=0 only for emergency)',
     );
   }
 
