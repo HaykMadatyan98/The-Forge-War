@@ -21,7 +21,7 @@
     "db:backup": "bash scripts/backup-db.sh",
     "prod:up": "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build",
     "prod:down": "docker compose -f docker-compose.prod.yml --env-file .env.prod down",
-    "render:build": "npm ci && npm run build -w @tfw/api",
+    "render:build": "npm ci --include=dev && npm run build -w @tfw/api",
     "render:start": "npm run db:deploy -w @tfw/api && npm run start:prod -w @tfw/api"
   },
   "engines": {
