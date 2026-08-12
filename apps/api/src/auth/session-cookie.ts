@@ -59,6 +59,28 @@ export function extractSessionToken(req: Request): string | null {
   return cookies[SESSION_COOKIE] || null;
 }
 
+/** Socket.IO handshake: auth.token, Authorization, or session cookie. */
+export function extractHandshakeToken(handshake: {
+  auth?: Record<string, unknown>;
+  headers?: Record<string, unknown>;
+}): string | null {
+  const fromAuth = handshake.auth?.token;
+  if (typeof fromAuth === 'string' && fromAuth.trim()) return fromAuth.trim();
+
+  const authHeader = handshake.headers?.authorization;
+  if (typeof authHeader === 'string') {
+    const b = bearerToken(authHeader);
+    if (b) return b;
+  }
+
+  const cookieHeader = handshake.headers?.cookie;
+  if (typeof cookieHeader === 'string') {
+    const cookies = parseCookieHeader(cookieHeader);
+    if (cookies[SESSION_COOKIE]) return cookies[SESSION_COOKIE];
+  }
+  return null;
+}
+
 function cookieHeader(value: string, expiresAt?: Date) {
   const sameSite = cookieSameSite();
   const secure = cookieSecure() || sameSite === 'None';

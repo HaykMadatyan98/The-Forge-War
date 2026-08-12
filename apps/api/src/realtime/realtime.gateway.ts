@@ -10,6 +10,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
+import { extractHandshakeToken } from '../auth/session-cookie';
 import { ChatService } from '../chat/chat.service';
 import { logMetric } from '../metrics/metrics';
 import { LivePvpService } from './live-pvp.service';
@@ -22,6 +23,8 @@ type AuthedSocket = Socket & { playerId?: string };
     credentials: true,
   },
   namespace: '/realtime',
+  // Prefer websocket; polling fallback still works behind proxies that support Upgrade
+  transports: ['websocket', 'polling'],
 })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -44,10 +47,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   private async authenticate(client: AuthedSocket): Promise<string | null> {
-    const token =
-      (client.handshake.auth?.token as string) ||
-      (client.handshake.headers?.authorization as string)?.replace(/^Bearer\s+/i, '') ||
-      null;
+    const token = extractHandshakeToken(client.handshake as any);
     const player = await this.auth.playerFromToken(token);
     if (!player) return null;
     client.playerId = player.id;
@@ -77,6 +77,11 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   handleDisconnect(client: AuthedSocket) {
     const playerId = client.playerId;
     if (!playerId) return;
+    // Ignore stale tab/socket: a newer connection already replaced this one
+    if (this.online.get(playerId) !== client.id) {
+      logMetric('ws_disconnect_stale', { playerId, socketId: client.id });
+      return;
+    }
     this.online.delete(playerId);
     const inMatch = this.livePvp.getMatchForPlayer(playerId);
     if (inMatch && inMatch.status !== 'finished') {

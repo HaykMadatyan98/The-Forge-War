@@ -136,6 +136,8 @@ function wireSocket(s: Socket) {
   });
 
   s.io.on('reconnect_attempt', (attempt) => {
+    // Keep cookie auth; also refresh bearer if present (dev / RETURN_AUTH_TOKEN)
+    s.auth = { ...(s.auth || {}), token: getAuthToken() };
     status.reconnecting = true;
     status.reconnectAttempts = attempt;
     emitStatus();
@@ -159,6 +161,8 @@ export function getRealtimeSocket(): Socket {
     socket = io(`${API_BASE}/realtime`, {
       auth: { token: getAuthToken() },
       withCredentials: true,
+      // Websocket first — avoids Engine.IO "sid unknown" 400s on multi-hop polling (Koyeb etc.)
+      transports: ['websocket', 'polling'],
       autoConnect: false,
       reconnection: true,
       reconnectionAttempts: 8,

@@ -4,6 +4,7 @@ export type MetricEvent =
   | 'auth_fail'
   | 'auth_ok'
   | 'ws_disconnect'
+  | 'ws_disconnect_stale'
   | 'ws_connect'
   | 'ws_auth_fail'
   | 'pvp_result_rejected'
