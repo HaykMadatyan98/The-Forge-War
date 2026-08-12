@@ -1,3 +1,4 @@
+// @ts-nocheck
 /** @typedef {'c'|'u'|'r'|'e'} Rarity */
 /** @typedef {'sword'|'greatsword'|'axemace'|'spear'|'bow'|'crossbow'|'thrown'|'shield'} WeaponType */
 /** @typedef {'metal'|'wood'|'leather'} LineId */

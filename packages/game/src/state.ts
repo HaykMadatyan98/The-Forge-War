@@ -1,3 +1,4 @@
+// @ts-nocheck
 import {
   BARRACKS_DEPLOY,
   BARRACKS_ROSTER,

@@ -48,7 +48,7 @@ export function smeltJobDurationMs(recipe) {
   return Math.min(12 * 60 * 1000, Math.max(1500, Math.round(sec * 1000 * tierSpeedMult(tier))));
 }
 
-export function mineJobDurationMs(resource, baseSec) {
+export function mineJobDurationMs(resource, baseSec = undefined) {
   const tier = RESOURCES[resource]?.tier || 1 + (MINEABLE.indexOf(resource) % 5);
   const base = baseSec ?? 90 + tier * 45;
   return Math.min(12 * 60 * 1000, Math.max(2000, Math.round(base * 1000 * tierSpeedMult(tier) * 0.9)));

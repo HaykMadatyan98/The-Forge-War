@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@tfw/game": "*",
-    "next": "^15.1.6",
+    "next": "^15.5.23",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.170.0"

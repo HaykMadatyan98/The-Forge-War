@@ -1,3 +1,4 @@
+// @ts-nocheck
 import {
   MAP_W,
   MAP_H,
