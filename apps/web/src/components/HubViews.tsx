@@ -1348,6 +1348,39 @@ function GearBonusLine({ base }: { base: Record<string, number> }) {
   );
 }
 
+function QuestAction({
+  canClaim,
+  claimed,
+  done,
+  onClaim,
+  onGo,
+}: {
+  canClaim: boolean;
+  claimed: boolean;
+  done?: boolean;
+  onClaim: () => void;
+  onGo?: () => void;
+}) {
+  if (canClaim) {
+    return (
+      <button type="button" className="primary quest-row-btn" onClick={onClaim}>
+        {t('questClaim')}
+      </button>
+    );
+  }
+  if (claimed || done) {
+    return <span className="quest-row-status muted">{t('questClaimed')}</span>;
+  }
+  if (onGo) {
+    return (
+      <button type="button" className="ghost quest-row-btn" onClick={onGo}>
+        {t('continue')}
+      </button>
+    );
+  }
+  return null;
+}
+
 export function QuestsView({
   state,
   refresh,
@@ -1359,152 +1392,166 @@ export function QuestsView({
   flash: (m: string) => void;
   goTab: (tab: string) => void;
 }) {
+  const [section, setSection] = useState<'daily' | 'story'>('daily');
   syncQuestObjectives(state);
   const summary = questsSummary(state);
   const list = questList(state);
   const dailies = dailyList(state);
   const pct = Math.round((summary.pct || 0) * 100);
+  const dailyClaimable = dailies.filter((q) => q.canClaim).length;
+  const storyClaimable = list.filter((q) => q.canClaim).length;
+  const dailyDone = dailies.filter((q) => q.done).length;
+
+  function rewardLine(gold: number, sparks: number) {
+    return `${gold} ${t('gold')}${sparks ? ` · ${sparks} ${t('sparks')}` : ''}`;
+  }
 
   return (
-    <>
+    <div className="quests-view">
       <div className="panel-header">
         <div>
           <h2>{t('quests')}</h2>
           <p className="muted">{t('questsHint')}</p>
         </div>
-        <div className="muted">
-          {t('questsProgress')}: {summary.done}/{summary.total}
-        </div>
       </div>
 
-      <div className="card" style={{ marginBottom: '0.85rem', padding: '0.65rem 0.75rem' }}>
-        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-          <span className="muted" style={{ fontSize: '0.82rem' }}>
-            {t('questsProgress')}
-          </span>
-          <b>{pct}%</b>
+      <div className="quests-progress-strip">
+        <div className="quests-progress-meta">
+          <span className="muted">{t('questsProgress')}</span>
+          <b>
+            {summary.done}/{summary.total}
+          </b>
+          <span className="muted">{pct}%</span>
         </div>
         <div className="progress">
           <i style={{ width: `${pct}%` }} />
         </div>
       </div>
 
-      <h3 style={{ marginTop: '0.25rem' }}>{t('dailiesTitle')}</h3>
-      <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '0.65rem' }}>
-        {t('dailiesHint')}
-      </p>
-      <div className="quest-list" style={{ marginBottom: '1.1rem' }}>
-        {dailies.map((q) => (
-          <div className={`card quest-card ${q.done ? 'done' : ''} ${q.canClaim ? 'claimable' : ''}`} key={q.id}>
-            <div className="row" style={{ justifyContent: 'space-between', gap: '0.5rem' }}>
-              <div>
-                <b>
-                  {q.done ? '✓ ' : ''}
-                  {t(q.labelKey)}
-                </b>
-                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
-                  {t(q.detailKey)} · {q.progress}/{q.target}
-                </p>
-                <span className="muted" style={{ fontSize: '0.8rem' }}>
-                  {t('questRewardGold')}: {q.rewardGold} {t('gold')}
-                  {q.rewardSparks ? ` · ${q.rewardSparks} ${t('sparks')}` : ''}
-                </span>
-              </div>
-              <div className="row" style={{ flexShrink: 0, gap: 6 }}>
-                {q.canClaim ? (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => {
+      <div className="boot-tabs quests-section-tabs">
+        <button
+          type="button"
+          className={section === 'daily' ? 'primary' : 'ghost'}
+          onClick={() => setSection('daily')}
+        >
+          {t('dailiesTitle')}
+          {dailyClaimable > 0 ? ` (${dailyClaimable})` : ''}
+        </button>
+        <button
+          type="button"
+          className={section === 'story' ? 'primary' : 'ghost'}
+          onClick={() => setSection('story')}
+        >
+          {t('questsStory')}
+          {storyClaimable > 0 ? ` (${storyClaimable})` : ''}
+        </button>
+      </div>
+
+      {section === 'daily' ? (
+        <div className="quests-section">
+          <p className="muted quests-section-hint">
+            {t('dailiesHint')} · {dailyDone}/{dailies.length}
+          </p>
+          <ul className="quest-rows">
+            {dailies.map((q) => (
+              <li
+                key={q.id}
+                className={`quest-row ${q.done ? 'is-done' : ''} ${q.canClaim ? 'is-claimable' : ''}`}
+              >
+                <div className="quest-row-main">
+                  <div className="quest-row-title">
+                    <span className="quest-row-mark" aria-hidden>
+                      {q.claimed ? '✓' : q.done ? '●' : '○'}
+                    </span>
+                    <b>{t(q.labelKey)}</b>
+                  </div>
+                  <p className="muted quest-row-detail">{t(q.detailKey)}</p>
+                  <div className="quest-row-meta">
+                    <span className="quest-row-progress">
+                      {q.progress}/{q.target}
+                    </span>
+                    <span className="muted">{rewardLine(q.rewardGold, q.rewardSparks)}</span>
+                  </div>
+                  <div className="quest-row-bar" aria-hidden>
+                    <i style={{ width: `${Math.round((q.progress / Math.max(1, q.target)) * 100)}%` }} />
+                  </div>
+                </div>
+                <div className="quest-row-action">
+                  <QuestAction
+                    canClaim={q.canClaim}
+                    claimed={q.claimed}
+                    done={q.done}
+                    onGo={() => goTab(q.tab)}
+                    onClaim={() => {
                       const res = claimDailyReward(state, q.id);
                       if (!res.ok) {
                         flash(res.err || 'err');
                         return;
                       }
                       refresh();
-                      flash(
-                        `+${res.gold} ${t('gold')}${res.sparks ? ` · +${res.sparks} ${t('sparks')}` : ''}`,
-                      );
+                      flash(`+${res.gold} ${t('gold')}${res.sparks ? ` · +${res.sparks} ${t('sparks')}` : ''}`);
                     }}
-                  >
-                    {t('questClaim')}
-                  </button>
-                ) : q.claimed ? (
-                  <span className="badge">{t('questClaimed')}</span>
-                ) : (
-                  <button type="button" className="ghost" onClick={() => goTab(q.tab)}>
-                    {t('continue')}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <h3>{t('questsStory')}</h3>
-      {summary.next ? (
-        <div className="card quest-active-banner" style={{ marginBottom: '0.85rem' }}>
-          <div className="muted">{t('questActive')}</div>
-          <b>{t(summary.next.labelKey)}</b>
-          <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.88rem' }}>
-            {t(summary.next.detailKey)}
-          </p>
-          <button type="button" className="primary" style={{ marginTop: '0.5rem' }} onClick={() => goTab(summary.next!.tab)}>
-            {t('continue')}
-          </button>
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
-      ) : null}
-
-      <div className="quest-list">
-        {list.map((q) => (
-          <div className={`card quest-card ${q.done ? 'done' : ''} ${q.canClaim ? 'claimable' : ''}`} key={q.id}>
-            <div className="row" style={{ justifyContent: 'space-between', gap: '0.5rem' }}>
-              <div>
-                <b>
-                  {q.done ? '✓ ' : ''}
-                  {t(q.labelKey)}
-                </b>
-                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
-                  {t(q.detailKey)}
-                </p>
-                <span className="muted" style={{ fontSize: '0.8rem' }}>
-                  {t('questRewardGold')}: {q.rewardGold} {t('gold')}
-                  {q.rewardSparks ? ` · ${q.rewardSparks} ${t('sparks')}` : ''}
-                </span>
-              </div>
-              <div className="row" style={{ flexShrink: 0, gap: 6 }}>
-                {q.canClaim ? (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => {
+      ) : (
+        <div className="quests-section">
+          {summary.next ? (
+            <div className="quest-focus">
+              <div className="muted">{t('questActive')}</div>
+              <b>{t(summary.next.labelKey)}</b>
+              <p className="muted">{t(summary.next.detailKey)}</p>
+              <button type="button" className="primary" onClick={() => goTab(summary.next!.tab)}>
+                {t('continue')}
+              </button>
+            </div>
+          ) : (
+            <p className="muted quests-section-hint">{t('questsProgress')}: {summary.done}/{summary.total}</p>
+          )}
+          <ol className="quest-rows story">
+            {list.map((q, i) => (
+              <li
+                key={q.id}
+                className={`quest-row ${q.done ? 'is-done' : ''} ${q.canClaim ? 'is-claimable' : ''} ${
+                  summary.next?.id === q.id ? 'is-active' : ''
+                }`}
+              >
+                <div className="quest-row-main">
+                  <div className="quest-row-title">
+                    <span className="quest-row-index muted">{i + 1}</span>
+                    <b>{t(q.labelKey)}</b>
+                  </div>
+                  <p className="muted quest-row-detail">{t(q.detailKey)}</p>
+                  <div className="quest-row-meta">
+                    <span className="muted">{rewardLine(q.rewardGold, q.rewardSparks)}</span>
+                  </div>
+                </div>
+                <div className="quest-row-action">
+                  <QuestAction
+                    canClaim={q.canClaim}
+                    claimed={q.claimed}
+                    done={q.done && q.claimed}
+                    onGo={!q.done ? () => goTab(q.tab) : undefined}
+                    onClaim={() => {
                       const res = claimQuestReward(state, q.id);
                       if (!res.ok) {
                         flash(res.err || 'err');
                         return;
                       }
                       refresh();
-                      flash(
-                        `+${res.gold} ${t('gold')}${res.sparks ? ` · +${res.sparks} ${t('sparks')}` : ''}`,
-                      );
+                      flash(`+${res.gold} ${t('gold')}${res.sparks ? ` · +${res.sparks} ${t('sparks')}` : ''}`);
                     }}
-                  >
-                    {t('questClaim')}
-                  </button>
-                ) : q.claimed ? (
-                  <span className="badge">{t('questClaimed')}</span>
-                ) : !q.done ? (
-                  <button type="button" className="ghost" onClick={() => goTab(q.tab)}>
-                    {t('continue')}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
+                  />
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
   );
 }
 

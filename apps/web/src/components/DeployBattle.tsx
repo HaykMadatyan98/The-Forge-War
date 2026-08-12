@@ -128,6 +128,7 @@ export function MissionScreen({
   const [placingId, setPlacingId] = useState<string | null>(deploy.selected[0] || null);
   const [waitingOpponent, setWaitingOpponent] = useState(false);
   const liveDoneRef = useRef(false);
+  const [battleTipDismissed, setBattleTipDismissed] = useState(!!state.flags?.battleTipSeen);
 
   const [battle, setBattle] = useState<any>(() => snapshotForDeploy(state, deploy, 'deploy'));
 
@@ -513,6 +514,18 @@ export function MissionScreen({
   const active = battle ? getActive(battle) : null;
   const humanActive = phase === 'play' && active && active.team === myTeam;
   const foeOf = (act: any) => (act?.team === 'player' ? 'enemy' : 'player');
+  const recentLog = (battle?.log || []).slice(0, 3);
+  const battlePhaseKey =
+    phase === 'deploy'
+      ? 'battlePhaseDeploy'
+      : !active
+        ? 'battlePhaseWait'
+        : active.team === myTeam
+          ? 'battlePhaseYourTurn'
+          : isLiveDuel
+            ? 'battlePhaseOpponent'
+            : 'battlePhaseEnemy';
+  const showBattleTip = phase === 'deploy' && !battleTipDismissed && !state.flags?.battleTipSeen;
 
   function onCanvasMove(e: React.MouseEvent) {
     const tile = worldRef.current?.pickTile(e) || null;
@@ -718,7 +731,19 @@ export function MissionScreen({
   return (
     <div className="battle-wrap">
       <div className="battle-stage">
-        <div className="battle-toolbar">
+        <div className="battle-phase-strip" aria-live="polite">
+          <span className={`battle-phase-chip ${phase === 'deploy' ? 'active' : ''}`}>{t('battlePhaseDeploy')}</span>
+          <span className="battle-phase-sep" aria-hidden>
+            →
+          </span>
+          <span className={`battle-phase-chip ${phase === 'play' ? 'active' : ''}`}>{t(battlePhaseKey)}</span>
+          {phase === 'play' && active ? (
+            <span className="muted battle-phase-unit">
+              · {active.name} · {t('round')} {battle.round}
+            </span>
+          ) : null}
+        </div>
+        <div className={`battle-toolbar ${phase === 'play' ? 'battle-toolbar--play' : ''}`}>
           {phase === 'deploy' ? (
             <>
               <strong>
@@ -761,6 +786,7 @@ export function MissionScreen({
               <span style={{ flex: 1 }} />
               <button
                 type="button"
+                className="ghost battle-toolbar-play-hide"
                 disabled={!humanActive}
                 onClick={() => {
                   if (isLiveDuel) {
@@ -775,7 +801,7 @@ export function MissionScreen({
               </button>
               <button
                 type="button"
-                className="ghost"
+                className="ghost battle-toolbar-play-hide"
                 onClick={() => {
                   if (isLiveDuel && deploy?.liveMatchId) {
                     connectRealtime().emit('live:finish', {
@@ -820,6 +846,30 @@ export function MissionScreen({
           ) : null}
           {phase === 'play' && preview ? <div className="battle-hover-chip">{preview}</div> : null}
         </div>
+        {phase === 'play' && recentLog.length ? (
+          <div className="battle-mini-log" aria-label={t('battleLogTitle')}>
+            {recentLog.map((line: string, i: number) => (
+              <div key={`${i}-${line.slice(0, 12)}`} className="battle-mini-log-line muted">
+                {line}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {showBattleTip ? (
+          <div className="battle-tip-banner">
+            <span>{t('battleTipFirst')}</span>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                state.flags = { ...(state.flags || {}), battleTipSeen: true };
+                setBattleTipDismissed(true);
+              }}
+            >
+              OK
+            </button>
+          </div>
+        ) : null}
       </div>
       <div className="battle-side">
         {phase === 'deploy' ? (
@@ -887,7 +937,7 @@ export function MissionScreen({
             )}
             <div className="unit-list">
               {battle.units
-                .filter((u: any) => u.team === 'player' || u.hp > 0)
+                .filter((u: any) => u.team === myTeam || (u.team !== myTeam && u.hp > 0))
                 .map((u: any) => {
                   const pct = Math.round((u.hp / u.maxHp) * 100);
                   const isAct = active && active.id === u.id;
@@ -945,6 +995,45 @@ export function MissionScreen({
           )}
         </div>
       </div>
+      {phase === 'play' ? (
+        <div className="battle-mobile-dock">
+          <button
+            type="button"
+            className="primary"
+            disabled={!humanActive}
+            onClick={() => {
+              if (isLiveDuel) {
+                emitLiveAction({ type: 'endTurn', unitId: active?.id });
+                return;
+              }
+              endUnitTurn(battle);
+              afterPlayer();
+            }}
+          >
+            {t('endTurn')}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              if (isLiveDuel && deploy?.liveMatchId) {
+                connectRealtime().emit('live:finish', {
+                  matchId: deploy.liveMatchId,
+                  victory: false,
+                });
+                liveDoneRef.current = true;
+                onDefeat(battle);
+                return;
+              }
+              forfeitBattle(battle);
+              if (battle.mode === 'victory') onVictory(battle);
+              else onDefeat(battle);
+            }}
+          >
+            {t('forfeit')}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

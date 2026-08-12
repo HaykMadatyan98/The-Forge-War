@@ -34,6 +34,10 @@ import {
   notifyQuestCompletions,
   bumpDaily,
   notifyDailyCompletions,
+  markOnboardingDone,
+  currentOnboardingStep,
+  onboardingStepTab,
+  hubTabUnlocked,
 } from '@tfw/game';
 import {
   pushSave,
@@ -73,22 +77,12 @@ import {
 } from './HubViews';
 import { MissionScreen } from './DeployBattle';
 import { SocialPanel } from './SocialPanel';
+import { HubNav, type HubTab } from './HubNav';
+import { OnboardingOverlay } from './OnboardingOverlay';
 import { connectRealtime, disconnectRealtime } from '@/lib/realtime';
 import type { LiveMatchedEvent } from '@/lib/realtime';
 
 type Screen = 'boot' | 'hub' | 'deploy' | 'battle' | 'summary' | 'levelup' | 'briefing';
-type HubTab =
-  | 'campaign'
-  | 'quests'
-  | 'arena'
-  | 'mine'
-  | 'forge'
-  | 'research'
-  | 'barracks'
-  | 'tavern'
-  | 'inventory'
-  | 'profile'
-  | 'social';
 
 export function GameShell() {
   const [lang, setLangState] = useState<'en' | 'ru'>('en');
@@ -121,7 +115,6 @@ export function GameShell() {
   const [resetToken, setResetToken] = useState('');
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
   const [oauthCfg, setOauthCfg] = useState<OauthConfig | null>(null);
-  const [questPopup, setQuestPopup] = useState<{ labelKey: string; detailKey: string; tab: string } | null>(null);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const [, tick] = useState(0);
 
@@ -499,12 +492,14 @@ export function GameShell() {
   useEffect(() => {
     if (screen !== 'hub' || !state) return;
     syncQuestObjectives(state);
-    const hint = activeQuestHint(state);
-    const { done, total } = questsSummary(state);
-    if (!hint || done >= total) return;
-    if (state.flags?.questPopupDismissed === hint.id) return;
-    setQuestPopup({ labelKey: hint.labelKey, detailKey: hint.detailKey, tab: hint.tab });
   }, [screen, state?.updatedAt, hubTab]);
+
+  useEffect(() => {
+    if (screen !== 'hub' || !state) return;
+    if (!hubTabUnlocked(state, hubTab)) {
+      setHubTab('campaign');
+    }
+  }, [screen, state, hubTab]);
 
   function beginDeploy(missionId: string, difficulty: string) {
     if (!isMissionUnlocked(state, missionId)) {
@@ -666,6 +661,9 @@ export function GameShell() {
       }
     } else if (mode === 'victory') {
       res = applyVictoryRewards(state, b);
+      if (b.missionId === 'fields_1' || state.campaign?.cleared?.fields_1) {
+        markOnboardingDone(state);
+      }
       bumpDaily(state, 'daily_campaign');
       const newlyQ = notifyQuestCompletions(state);
       const newlyD = notifyDailyCompletions(state);
@@ -1101,7 +1099,11 @@ export function GameShell() {
     ['copper_ore', 'iron_ore', 'softwood', 'scrap_hide', 'coal'].includes(k),
   );
   const freePts = state.warriors?.filter((w: any) => (w.freePoints || 0) > 0) || [];
-  const guideSteps = hubNextSteps(state, 3);
+  const guideSteps = hubNextSteps(state, 1);
+  const primaryGuide = guideSteps[0] || null;
+  const questHint = activeQuestHint(state);
+  const onboardingStep = currentOnboardingStep(state);
+  const onboardingTarget = onboardingStep ? onboardingStepTab(onboardingStep) : null;
 
   function goGuide(tab: string) {
     if (tab === 'levelup') {
@@ -1111,45 +1113,20 @@ export function GameShell() {
     setHubTab(tab as HubTab);
   }
 
+  function goHubTab(tab: HubTab) {
+    setHubTab(tab);
+  }
+
   return (
     <div className="hub">
-      <nav className="hub-nav">
-        <div className="hub-brand">{t('gameTitle')}</div>
-        {(
-          [
-            ['campaign', t('campaign')],
-            ['quests', t('quests')],
-            ['arena', t('pvp')],
-            ['mine', t('mine')],
-            ['forge', t('forge')],
-            ['research', t('research')],
-            ['barracks', t('barracks')],
-            ['tavern', t('tavern')],
-            ['inventory', t('inventory')],
-            ['social', t('social') || 'Social'],
-            ['profile', t('profileTab')],
-          ] as const
-        ).map(([id, label]) => (
-          <button key={id} type="button" className={hubTab === id ? 'active' : ''} onClick={() => setHubTab(id)}>
-            {label}
-          </button>
-        ))}
-        <div style={{ flex: 1 }} />
-        {player ? (
-          <div className="hub-player-chip" onClick={() => setHubTab('profile')} role="button">
-            <AccountAvatar avatarKey={player.avatarKey} name={player.displayName || '?'} size={28} />
-            <span>{player.displayName || player.email.split('@')[0]}</span>
-          </div>
-        ) : null}
-              {player?.role === 'admin' ? (
-                <a href="/admin" className="ghost" style={{ marginLeft: '0.5rem' }}>
-                  Admin
-                </a>
-              ) : null}
-              <button type="button" className="ghost" onClick={() => setScreen('boot')}>
-          {t('settings')}
-        </button>
-      </nav>
+      <HubNav
+        hubTab={hubTab}
+        setHubTab={goHubTab}
+        state={state}
+        player={player}
+        onboardingTarget={onboardingTarget}
+        onSettings={() => setScreen('boot')}
+      />
       <div className="hub-main">
         <div className="topbar">
           <span
@@ -1207,69 +1184,27 @@ export function GameShell() {
             </button>
           </div>
         ) : null}
-        {questPopup ? (
-          <div className="hub-banner quest-popup">
-            <div>
-              <b>{t('questActive')}: {t(questPopup.labelKey)}</b>
-              <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
-                {t(questPopup.detailKey)}
-              </p>
+        {questHint || primaryGuide ? (
+          <div className="hub-next-step">
+            <div className="hub-next-step-text">
+              <span className="muted">{t('guideNext')}</span>
+              <b>{questHint ? t(questHint.labelKey) : primaryGuide ? t(primaryGuide.labelKey) : ''}</b>
+              {questHint ? (
+                <span className="muted hub-next-step-detail">{t(questHint.detailKey)}</span>
+              ) : primaryGuide?.detailKey ? (
+                <span className="muted hub-next-step-detail">{t(primaryGuide.detailKey)}</span>
+              ) : null}
             </div>
-            <div className="row" style={{ gap: 6 }}>
-              <button
-                type="button"
-                className="primary"
-                onClick={() => {
-                  const tab = questPopup.tab as HubTab;
-                  setQuestPopup(null);
-                  if (tab === 'arena') setHubTab('arena');
-                  else setHubTab(tab);
-                }}
-              >
-                {t('continue')}
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  if (state && questPopup) {
-                    state.flags = { ...(state.flags || {}), questPopupDismissed: activeQuestHint(state)?.id };
-                    persist(state);
-                  }
-                  setQuestPopup(null);
-                }}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {guideSteps.length ? (
-          <div className="hub-guide">
-            <div className="hub-guide-label muted">{t('guideNext')}</div>
-            <div className="hub-guide-row">
-              {guideSteps.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`hub-guide-card ${s.tab === hubTab || (s.tab === 'levelup' && freePts.length) ? 'here' : ''}`}
-                  onClick={() => {
-                    if (!state.flags?.loopSeen) {
-                      state.flags = { ...(state.flags || {}), loopSeen: true };
-                      persist(state);
-                    }
-                    goGuide(s.tab);
-                  }}
-                >
-                  <b>{t(s.labelKey)}</b>
-                  {s.detailKey ? <span className="muted">{t(s.detailKey)}</span> : null}
-                  {s.meta?.missionId ? (
-                    <span className="hub-guide-meta">{t(String(s.meta.missionId))}</span>
-                  ) : null}
-                  {s.meta?.bp ? <span className="hub-guide-meta">{t(String(s.meta.bp))}</span> : null}
-                </button>
-              ))}
-            </div>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                if (questHint) goHubTab(questHint.tab as HubTab);
+                else if (primaryGuide) goGuide(primaryGuide.tab);
+              }}
+            >
+              {t('continue')}
+            </button>
           </div>
         ) : null}
         <div className="panel">
@@ -1380,6 +1315,15 @@ export function GameShell() {
           ) : null}
         </div>
       </div>
+      <OnboardingOverlay
+        state={state}
+        hubTab={hubTab}
+        onGoTab={goHubTab}
+        onPersist={() => {
+          persist(state);
+          setState({ ...state });
+        }}
+      />
     </div>
   );
 }
