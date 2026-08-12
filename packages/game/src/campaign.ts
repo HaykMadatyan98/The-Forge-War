@@ -1,4 +1,4 @@
-import { REGIONS } from './catalog';
+import { DIFFICULTY_MULT, REGIONS } from './catalog';
 
 /** Flat campaign spine — linear unlock order. */
 export function allMissionsInOrder() {
@@ -84,4 +84,27 @@ export function storyIntroKey(missionId) {
 
 export function storyOutroKey(missionId) {
   return `outro_${missionId}`;
+}
+
+/**
+ * Session-planning estimate for a mission (~minutes of play).
+ * Scales with foe count and boss fights so players can fit a 15–30 min session.
+ */
+export function missionEtaMinutes(mission) {
+  if (!mission) return 5;
+  const enemies = Number(mission.enemies) || 2;
+  const bossExtra = mission.boss ? 3 : 0;
+  return Math.max(5, Math.round(3.5 + enemies * 1.15 + bossExtra));
+}
+
+/** Preview of catalog rewards for a difficulty (matches battle rewardMult). */
+export function missionRewardPreview(mission, difficulty = 'normal') {
+  if (!mission?.reward) return {};
+  const mult = (DIFFICULTY_MULT[difficulty] || DIFFICULTY_MULT.normal)?.reward || 1;
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (const [k, v] of Object.entries(mission.reward)) {
+    out[k] = Math.round(Number(v) * mult);
+  }
+  return out;
 }

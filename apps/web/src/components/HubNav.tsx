@@ -8,26 +8,26 @@ import type { PublicPlayer } from '@/lib/api';
 
 export type HubTab = HubTabId;
 
-type NavItem = { id: HubTab; label: string };
+type NavItem = { id: HubTab; label: string; icon: string };
 
 const FIGHT_TABS: NavItem[] = [
-  { id: 'campaign', label: 'campaign' },
-  { id: 'quests', label: 'quests' },
-  { id: 'arena', label: 'pvp' },
+  { id: 'campaign', label: 'campaign', icon: '⚔' },
+  { id: 'quests', label: 'quests', icon: '✦' },
+  { id: 'arena', label: 'pvp', icon: '◈' },
 ];
 
 const BASE_TABS: NavItem[] = [
-  { id: 'mine', label: 'mine' },
-  { id: 'forge', label: 'forge' },
-  { id: 'research', label: 'research' },
-  { id: 'barracks', label: 'barracks' },
-  { id: 'tavern', label: 'tavern' },
-  { id: 'inventory', label: 'inventory' },
+  { id: 'mine', label: 'mine', icon: '⛏' },
+  { id: 'forge', label: 'forge', icon: '⚒' },
+  { id: 'research', label: 'research', icon: '◎' },
+  { id: 'barracks', label: 'barracks', icon: '⛨' },
+  { id: 'tavern', label: 'tavern', icon: '⌂' },
+  { id: 'inventory', label: 'inventory', icon: '▣' },
 ];
 
 const ACCOUNT_TABS: NavItem[] = [
-  { id: 'social', label: 'social' },
-  { id: 'profile', label: 'profileTab' },
+  { id: 'social', label: 'social', icon: '☍' },
+  { id: 'profile', label: 'profileTab', icon: '☺' },
 ];
 
 function visibleItems(items: NavItem[], state: any) {
@@ -57,7 +57,7 @@ export function HubNav({
     setSheet(null);
   }
 
-  function navBtn(item: NavItem, compact = false) {
+  function navBtn(item: NavItem) {
     const locked = !hubTabUnlocked(state, item.id);
     const active = hubTab === item.id;
     const highlight = onboardingTarget === item.id;
@@ -71,7 +71,10 @@ export function HubNav({
         title={locked ? t('onboardingTabLocked') : undefined}
         onClick={() => pick(item.id)}
       >
-        {compact ? t(item.label).slice(0, 8) : t(item.label)}
+        <span className="hub-nav-ico" aria-hidden>
+          {item.icon}
+        </span>
+        <span className="hub-nav-label">{t(item.label)}</span>
       </button>
     );
   }
@@ -83,45 +86,50 @@ export function HubNav({
   return (
     <>
       <nav className="hub-nav hub-nav-desktop" aria-label={t('hubNavLabel')}>
-        <div className="hub-brand">{t('gameTitle')}</div>
+        <div className="hub-brand-block">
+          <div className="hub-brand">{t('gameTitle')}</div>
+          <div className="hub-brand-tag muted">Hub</div>
+        </div>
 
-        {fight.length ? (
-          <div className="hub-nav-group">
-            <div className="hub-nav-group-label muted">{t('hubGroupFight')}</div>
-            {fight.map((item) => navBtn(item))}
-          </div>
-        ) : null}
+        <div className="hub-nav-scroll">
+          {fight.length ? (
+            <div className="hub-nav-group">
+              <div className="hub-nav-group-label muted">{t('hubGroupFight')}</div>
+              {fight.map((item) => navBtn(item))}
+            </div>
+          ) : null}
 
-        {base.length ? (
-          <div className="hub-nav-group">
-            <div className="hub-nav-group-label muted">{t('hubGroupBase')}</div>
-            {base.map((item) => navBtn(item))}
-          </div>
-        ) : null}
+          {base.length ? (
+            <div className="hub-nav-group">
+              <div className="hub-nav-group-label muted">{t('hubGroupBase')}</div>
+              {base.map((item) => navBtn(item))}
+            </div>
+          ) : null}
 
-        <div className="hub-nav-spacer" />
+          {account.length ? (
+            <div className="hub-nav-group">
+              <div className="hub-nav-group-label muted">{t('hubGroupAccount')}</div>
+              {account.map((item) => navBtn(item))}
+            </div>
+          ) : null}
+        </div>
 
-        {account.length ? (
-          <div className="hub-nav-group">
-            <div className="hub-nav-group-label muted">{t('hubGroupAccount')}</div>
-            {account.map((item) => navBtn(item))}
-          </div>
-        ) : null}
-
-        {player ? (
-          <div className="hub-player-chip" onClick={() => pick('profile')} role="button" tabIndex={0}>
-            <AccountAvatar avatarKey={player.avatarKey} name={player.displayName || '?'} size={28} />
-            <span>{player.displayName || player.email.split('@')[0]}</span>
-          </div>
-        ) : null}
-        {player?.role === 'admin' ? (
-          <a href="/admin" className="ghost hub-nav-foot">
-            Admin
-          </a>
-        ) : null}
-        <button type="button" className="ghost hub-nav-foot" onClick={onSettings}>
-          {t('settings')}
-        </button>
+        <div className="hub-nav-footer">
+          {player ? (
+            <button type="button" className="hub-player-chip" onClick={() => pick('profile')}>
+              <AccountAvatar avatarKey={player.avatarKey} name={player.displayName || '?'} size={28} />
+              <span className="hub-player-name">{player.displayName || player.email.split('@')[0]}</span>
+            </button>
+          ) : null}
+          {player?.role === 'admin' ? (
+            <a href="/admin" className="ghost hub-nav-foot">
+              Admin
+            </a>
+          ) : null}
+          <button type="button" className="ghost hub-nav-foot" onClick={onSettings}>
+            {t('settings')}
+          </button>
+        </div>
       </nav>
 
       <nav className="hub-nav-mobile-bar" aria-label={t('hubNavLabel')}>
@@ -143,7 +151,7 @@ export function HubNav({
           onClick={() => pick('quests')}
         >
           <span className="hub-mobile-icon" aria-hidden>
-            📋
+            ✦
           </span>
           <span>{t('quests')}</span>
         </button>
@@ -153,7 +161,7 @@ export function HubNav({
           onClick={() => setSheet('base')}
         >
           <span className="hub-mobile-icon" aria-hidden>
-            🏭
+            ⚒
           </span>
           <span>{t('hubNavBase')}</span>
         </button>
@@ -188,6 +196,9 @@ export function HubNav({
                   disabled={!hubTabUnlocked(state, item.id)}
                   onClick={() => pick(item.id)}
                 >
+                  <span className="hub-sheet-ico" aria-hidden>
+                    {item.icon}
+                  </span>
                   {t(item.label)}
                 </button>
               ))}

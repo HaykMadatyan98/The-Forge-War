@@ -37,6 +37,8 @@ import {
   allMissionsInOrder,
   campaignProgress,
   isMissionUnlocked,
+  missionEtaMinutes,
+  missionRewardPreview,
   masteryBonusSnapshot,
   masteryBonusTable,
   MASTERY_CAP,
@@ -259,38 +261,42 @@ export function CampaignView({ state, onFight }: { state: any; onFight: (id: str
       <div className="panel-header">
         <div>
           <h2>{t('campaign')}</h2>
-          <p className="muted">{t('story_fields')}</p>
+          <p className="muted">{t('campaignSessionHint')}</p>
         </div>
-        <div className="muted">
-          {t('chapterProgress')}: {progress.cleared}/{progress.total} ({progress.percent}%)
-          <br />
-          {t('deployCap')}: {deployCap(state)} · {t('rosterCap')}: {state.warriors.length}/{rosterCap(state)}
+        <div className="campaign-progress-chip">
+          <span className="muted">{t('chapterProgress')}</span>
+          <b>
+            {progress.cleared}/{progress.total}
+          </b>
+          <div className="campaign-progress-bar" aria-hidden>
+            <i style={{ width: `${progress.percent}%` }} />
+          </div>
+          <span className="muted" style={{ fontSize: '0.78rem' }}>
+            {t('deployCap')}: {deployCap(state)} · {t('rosterCap')}: {state.warriors.length}/{rosterCap(state)}
+          </span>
         </div>
       </div>
 
       {progress.next ? (
-        <div className="card campaign-next" style={{ marginBottom: '0.85rem' }}>
-          <div className="muted">{t('campaignNext')}</div>
-          <h3 style={{ margin: '0.2rem 0' }}>{t(progress.next.id)}</h3>
-          <p className="muted" style={{ fontSize: '0.9rem' }}>
-            {t(`intro_${progress.next.id}`)}
-          </p>
-          <div className="row" style={{ marginTop: '0.5rem', justifyContent: 'space-between' }}>
-            <span className="muted">
-              {t(progress.next.regionId)} · {t('foesLabel')} {progress.next.enemies} · Lv{progress.next.enemyLvl}
-              {progress.next.boss ? ` · ${t('boss')}` : ''}
-            </span>
-            <MissionFight missionId={progress.next.id} onFight={onFight} primary />
+        <div className="card campaign-next">
+          <div className="campaign-next-head">
+            <div>
+              <div className="muted">{t('campaignNext')}</div>
+              <h3>{t(progress.next.id)}</h3>
+            </div>
+            <span className="mission-eta-pill">{t('campaignEta').replace('{n}', String(missionEtaMinutes(progress.next)))}</span>
           </div>
+          <p className="muted campaign-next-intro">{t(`intro_${progress.next.id}`)}</p>
+          <MissionFight mission={progress.next} onFight={onFight} primary showRewards layout="hero" />
         </div>
       ) : (
-        <div className="card" style={{ marginBottom: '0.85rem' }}>
+        <div className="card campaign-next campaign-next--done">
           <b>{t('campaignCleared')}</b>
           <p className="muted">{t('outro_hills_boss')}</p>
         </div>
       )}
 
-      <h3>{t('campaignPath')}</h3>
+      <h3 className="section-title">{t('campaignPath')}</h3>
       <div className="campaign-path">
         {missions.map((m: any, i: number) => {
           const cleared = !!state.campaign.cleared[m.id];
@@ -308,44 +314,39 @@ export function CampaignView({ state, onFight }: { state: any; onFight: (id: str
               <div
                 className={`card mission-node ${cleared ? 'cleared' : ''} ${isNext ? 'current' : ''} ${!open ? 'locked-card' : ''}`}
               >
-                <div className="row" style={{ justifyContent: 'space-between', gap: '0.75rem' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="row" style={{ gap: '0.4rem', flexWrap: 'wrap' }}>
-                      <span className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {i + 1}.
-                      </span>
+                <div className="mission-node-body">
+                  <div className="mission-node-main">
+                    <div className="mission-node-title">
+                      <span className="mission-index muted">{i + 1}.</span>
                       <b>{t(m.id)}</b>
                       {m.boss ? <span className="badge">{t('boss')}</span> : null}
                       {cleared ? (
-                        <span className="badge" style={{ borderColor: 'var(--good)', color: 'var(--good)' }}>
-                          ✓ {t('campaignCleared')}
-                        </span>
+                        <span className="badge badge-good">✓ {t('campaignCleared')}</span>
                       ) : open ? (
                         <span className="badge">{t('campaignAvailable')}</span>
                       ) : (
                         <span className="badge">{t('campaignLocked')}</span>
                       )}
+                      {open ? (
+                        <span className="mission-eta-pill muted">
+                          {t('campaignEta').replace('{n}', String(missionEtaMinutes(m)))}
+                        </span>
+                      ) : null}
                     </div>
-                    <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.86rem' }}>
+                    <p className="muted mission-node-sub">
                       {t(m.regionId)} · {t('foesLabel')} {m.enemies} · Lv{m.enemyLvl}
                     </p>
                     {open && !cleared ? (
-                      <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: 'var(--text)' }}>
-                        {t(`intro_${m.id}`)}
-                      </p>
+                      <p className="mission-node-blurb">{t(`intro_${m.id}`)}</p>
                     ) : null}
                     {cleared ? (
-                      <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.82rem' }}>
-                        {t(`outro_${m.id}`)}
-                      </p>
+                      <p className="muted mission-node-blurb">{t(`outro_${m.id}`)}</p>
                     ) : null}
                   </div>
                   {open ? (
-                    <MissionFight missionId={m.id} onFight={onFight} primary={isNext} />
+                    <MissionFight mission={m} onFight={onFight} primary={isNext} showRewards />
                   ) : (
-                    <span className="muted" style={{ fontSize: '0.8rem', maxWidth: 120, textAlign: 'right' }}>
-                      {t('campaignLocked')}
-                    </span>
+                    <span className="muted mission-locked-hint">{t('campaignLocked')}</span>
                   )}
                 </div>
               </div>
@@ -357,30 +358,65 @@ export function CampaignView({ state, onFight }: { state: any; onFight: (id: str
   );
 }
 
+function MissionMeta({ mission, difficulty }: { mission: any; difficulty?: string }) {
+  const rewards = missionRewardPreview(mission, difficulty || 'normal');
+  const entries = Object.entries(rewards);
+  if (!entries.length) return null;
+  return (
+    <div className="mission-meta">
+      <span className="muted mission-meta-label">{t('campaignRewards')}</span>
+      <div className="mission-reward-row">
+        {entries.map(([k, v]) => (
+          <span className="mission-reward-chip" key={k}>
+            {k === 'gold' ? <IconGold s={14} /> : k === 'sparks' ? <IconSpark s={14} /> : <IconRes id={k} s={14} />}
+            <span>
+              {k === 'gold' ? t('gold') : k === 'sparks' ? t('sparks') : t(k)}{' '}
+              <b>{v as number}</b>
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MissionFight({
-  missionId,
+  mission,
   onFight,
   primary,
+  showRewards,
+  layout = 'side',
 }: {
-  missionId: string;
+  mission: any;
   onFight: (id: string, d: string) => void;
   primary?: boolean;
+  showRewards?: boolean;
+  layout?: 'side' | 'hero';
 }) {
   const [diff, setDiff] = useState('normal');
   return (
-    <div className="row" style={{ flexShrink: 0 }}>
-      <FancySelect
-        value={diff}
-        onChange={setDiff}
-        options={[
-          { value: 'normal', label: t('normal') },
-          { value: 'hard', label: t('hard') },
-          { value: 'brutal', label: t('brutal') },
-        ]}
-      />
-      <button type="button" className={primary ? 'primary' : ''} onClick={() => onFight(missionId, diff)}>
-        {t('fight')}
-      </button>
+    <div className={`mission-fight-block ${layout === 'hero' ? 'mission-fight-block--hero' : ''}`}>
+      {showRewards ? <MissionMeta mission={mission} difficulty={diff} /> : null}
+      <div className="mission-fight">
+        {layout === 'hero' ? (
+          <span className="muted mission-fight-meta">
+            {t(mission.regionId)} · {t('foesLabel')} {mission.enemies} · Lv{mission.enemyLvl}
+            {mission.boss ? ` · ${t('boss')}` : ''}
+          </span>
+        ) : null}
+        <FancySelect
+          value={diff}
+          onChange={setDiff}
+          options={[
+            { value: 'normal', label: t('normal') },
+            { value: 'hard', label: t('hard') },
+            { value: 'brutal', label: t('brutal') },
+          ]}
+        />
+        <button type="button" className={primary ? 'primary' : ''} onClick={() => onFight(mission.id, diff)}>
+          {t('fight')}
+        </button>
+      </div>
     </div>
   );
 }
