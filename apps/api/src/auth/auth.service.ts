@@ -9,7 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { oauthEnv, verifyOauthIdToken, type OauthProvider } from './oauth';
-import { allowDevEmailToken, sendVerificationEmail } from './mail';
+import { allowDevEmailToken, returnVerifyTokenOnMailFail, sendVerificationEmail } from './mail';
 
 const SESSION_DAYS = 14;
 const VERIFY_HOURS = 48;
@@ -113,8 +113,18 @@ export class AuthService {
 
   private async sendVerify(player: { id: string; email: string }) {
     const raw = await this.createEmailToken(player.id);
-    await sendVerificationEmail(player.email, raw);
-    return raw;
+    const mail = await sendVerificationEmail(player.email, raw);
+    return { raw, mail };
+  }
+
+  private attachVerifyTokenOut(
+    out: Record<string, unknown>,
+    raw: string,
+    mail: { sent: boolean },
+  ) {
+    if (allowDevEmailToken()) out.devVerifyToken = raw;
+    if (!mail.sent && returnVerifyTokenOnMailFail()) out.verifyToken = raw;
+    if (!mail.sent) out.emailDeliveryFailed = true;
   }
 
   async register(body: {
@@ -148,15 +158,15 @@ export class AuthService {
       },
     });
 
-    const rawToken = await this.sendVerify(player);
+    const { raw: rawToken, mail } = await this.sendVerify(player);
 
     const out: Record<string, unknown> = {
       ok: true,
       needsVerification: true,
       email: player.email,
-      message: 'check_email',
+      message: mail.sent ? 'check_email' : 'check_email_or_contact_support',
     };
-    if (allowDevEmailToken()) out.devVerifyToken = rawToken;
+    this.attachVerifyTokenOut(out, rawToken, mail);
     return out;
   }
 
@@ -216,9 +226,9 @@ export class AuthService {
     if (!player || player.emailVerified || !player.passwordHash) {
       return { ok: true, message: 'if_registered_check_email' };
     }
-    const raw = await this.sendVerify(player);
+    const { raw, mail } = await this.sendVerify(player);
     const out: Record<string, unknown> = { ok: true, message: 'if_registered_check_email' };
-    if (allowDevEmailToken()) out.devVerifyToken = raw;
+    this.attachVerifyTokenOut(out, raw, mail);
     return out;
   }
 
@@ -240,9 +250,11 @@ export class AuthService {
     if (player?.passwordHash && player.emailVerified) {
       const raw = await this.createPasswordResetToken(player.id);
       const { sendPasswordResetEmail } = await import('./mail');
-      await sendPasswordResetEmail(player.email, raw);
+      const mail = await sendPasswordResetEmail(player.email, raw);
       const out: Record<string, unknown> = { ok: true, message: 'if_registered_check_email' };
       if (allowDevEmailToken()) out.devResetToken = raw;
+      if (!mail.sent && returnVerifyTokenOnMailFail()) out.resetToken = raw;
+      if (!mail.sent) out.emailDeliveryFailed = true;
       return out;
     }
     return { ok: true, message: 'if_registered_check_email' };

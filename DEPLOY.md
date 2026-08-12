@@ -29,7 +29,17 @@ git add -A && git commit -m "Prepare Render + Vercel deploy" && git push
 | `COOKIE_SAMESITE` | `None` |
 | `COOKIE_SECURE` | `1` |
 | `TRUST_PROXY` | `1` |
-| `REQUIRE_SMTP` | `0` until Resend is set |
+| `MAIL_PREFER_SMTP` | `1` |
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_SECURE` | `0` |
+| `SMTP_USER` | `madatyanh@gmail.com` |
+| `SMTP_PASS` | Google **App Password** (16 chars) |
+| `SMTP_FROM` | `The Forge War <madatyanh@gmail.com>` |
+| `REQUIRE_SMTP` | `1` |
+| `RETURN_VERIFY_TOKEN_ON_MAIL_FAIL` | `0` |
+
+**Do not set `RESEND_API_KEY`** when using Gmail (otherwise Resend sandbox may be tried first unless `MAIL_PREFER_SMTP=1`).
 
 6. Deploy → copy URL, e.g. `https://tfw-api.onrender.com`
 
@@ -64,10 +74,34 @@ On **Vercel**, confirm `NEXT_PUBLIC_API_URL` is correct → Redeploy if you chan
 ### 5. Smoke
 
 1. Open Vercel URL
-2. Register (with `REQUIRE_SMTP=0`, check Render logs for verify link)
-3. Or set Resend SMTP and `REQUIRE_SMTP=1`
+2. Register with any email → verification letter should arrive from Gmail
+3. Click link or check spam folder
 
-### Resend (optional but recommended)
+### Gmail SMTP (no custom domain)
+
+See `apps/api/.env.gmail.example`.
+
+1. [Google Account](https://myaccount.google.com/security) → **2-Step Verification** ON
+2. **App passwords** → app “Mail” → copy password
+3. Render env (secrets):
+
+```text
+MAIL_PREFER_SMTP=1
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=0
+SMTP_USER=madatyanh@gmail.com
+SMTP_PASS=xxxx xxxx xxxx xxxx
+SMTP_FROM=The Forge War <madatyanh@gmail.com>
+REQUIRE_SMTP=1
+```
+
+4. **Delete** `RESEND_API_KEY` from Render if present
+5. Redeploy API
+
+Limits: ~500 emails/day on free Gmail. For scale, buy a domain + Resend later.
+
+### Resend with custom domain (production)
 
 ```text
 SMTP_HOST=smtp.resend.com
