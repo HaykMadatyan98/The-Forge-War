@@ -10,6 +10,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { oauthEnv, verifyOauthIdToken, type OauthProvider } from './oauth';
 import { allowDevEmailToken, returnVerifyTokenOnMailFail, sendVerificationEmail } from './mail';
+import { logMetric } from '../metrics/metrics';
 
 const SESSION_DAYS = 14;
 const VERIFY_HOURS = 48;
@@ -174,15 +175,23 @@ export class AuthService {
     const email = this.normalizeEmail(body.email || '');
     const password = String(body.password || '');
     const player = await this.prisma.player.findUnique({ where: { email } });
-    if (!player?.passwordHash) throw new UnauthorizedException('bad_credentials');
+    if (!player?.passwordHash) {
+      logMetric('auth_fail', { reason: 'bad_credentials', email });
+      throw new UnauthorizedException('bad_credentials');
+    }
     const ok = await bcrypt.compare(password, player.passwordHash);
-    if (!ok) throw new UnauthorizedException('bad_credentials');
+    if (!ok) {
+      logMetric('auth_fail', { reason: 'bad_credentials', email });
+      throw new UnauthorizedException('bad_credentials');
+    }
 
     if (!player.emailVerified) {
+      logMetric('auth_fail', { reason: 'email_not_verified', email });
       throw new ForbiddenException('email_not_verified');
     }
 
     const session = await this.issueSession(player.id);
+    logMetric('auth_ok', { playerId: player.id });
     return {
       token: session.token,
       expiresAt: session.expiresAt.toISOString(),

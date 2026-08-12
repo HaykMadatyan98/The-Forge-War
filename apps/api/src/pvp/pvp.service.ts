@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { squadFromCloudSave } from './squadFromSave';
 import { BattleService } from '../battle/battle.service';
+import { logMetric } from '../metrics/metrics';
 
 type PublicPlayer = {
   id: string;
@@ -240,9 +241,14 @@ export class PvpService {
     if (match.status !== 'open') throw new BadRequestException('invalid_match_status');
 
     let acceptedVictory = !!victory;
-    if (victory && process.env.VALIDATE_PVP !== '0') {
+    if (process.env.VALIDATE_PVP !== '0') {
       const saveRow = await this.prisma.gameSave.findUnique({ where: { playerId: attackerId } });
       const defense = await this.prisma.pvpDefense.findUnique({ where: { playerId: match.defenderId } });
+
+      if (victory && !deploy?.warriorIds?.length) {
+        throw new ForbiddenException('deploy_required');
+      }
+
       if (saveRow && defense && deploy?.warriorIds?.length) {
         try {
           const state = JSON.parse(saveRow.data) as Record<string, unknown>;
@@ -256,6 +262,11 @@ export class PvpService {
             true,
           );
           if (!check.accepted) {
+            logMetric('pvp_result_rejected', {
+              matchId,
+              attackerId,
+              reason: (check as any).reason || 'rejected',
+            });
             throw new ForbiddenException('result_rejected');
           }
           if (!check.simulatedVictory && !check.softPass) {
@@ -263,8 +274,10 @@ export class PvpService {
           }
         } catch (e) {
           if (e instanceof ForbiddenException) throw e;
-          /* validation soft-fail — trust client if sim breaks */
+          if (victory) throw new ForbiddenException('validation_failed');
         }
+      } else if (victory) {
+        throw new ForbiddenException('validation_unavailable');
       }
     }
 

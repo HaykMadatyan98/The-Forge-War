@@ -24,6 +24,12 @@ import {
   tickEnergy,
   energyRegenEta,
   formatEta,
+  syncQuestObjectives,
+  activeQuestHint,
+  markPvpDefensePosted,
+  markPvpWin,
+  questsSummary,
+  notifyQuestCompletions,
 } from '@tfw/game';
 import {
   pushSave,
@@ -59,14 +65,17 @@ import {
   PvpView,
   ResearchView,
   TavernView,
+  QuestsView,
 } from './HubViews';
 import { MissionScreen } from './DeployBattle';
 import { SocialPanel } from './SocialPanel';
-import { connectRealtime } from '@/lib/realtime';
+import { connectRealtime, disconnectRealtime } from '@/lib/realtime';
+import type { LiveMatchedEvent } from '@/lib/realtime';
 
 type Screen = 'boot' | 'hub' | 'deploy' | 'battle' | 'summary' | 'levelup' | 'briefing';
 type HubTab =
   | 'campaign'
+  | 'quests'
   | 'arena'
   | 'mine'
   | 'forge'
@@ -102,11 +111,13 @@ export function GameShell() {
   const [profileNick, setProfileNick] = useState('');
   const [profileAvatar, setProfileAvatar] = useState('p0');
   const [pvpMatchId, setPvpMatchId] = useState<string | null>(null);
+  const [liveMatchId, setLiveMatchId] = useState<string | null>(null);
   const [pvpDeploy, setPvpDeploy] = useState<{ ids: string[]; positions: { x: number; y: number }[] } | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [resetToken, setResetToken] = useState('');
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
   const [oauthCfg, setOauthCfg] = useState<OauthConfig | null>(null);
+  const [questPopup, setQuestPopup] = useState<{ labelKey: string; detailKey: string; tab: string } | null>(null);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const [, tick] = useState(0);
 
@@ -208,6 +219,11 @@ export function GameShell() {
           }
         }
         if (parts.length) flash(parts.join(' · '));
+        const newly = notifyQuestCompletions(state);
+        if (newly.length) {
+          flash(`${t('questJustDone')}: ${newly.map((q) => t(q.labelKey)).join(', ')}`);
+        }
+        syncQuestObjectives(state);
       } else if (energyChanged) {
         persist(state);
         setState({ ...state });
@@ -229,13 +245,36 @@ export function GameShell() {
   function persist(s: any) {
     writeSave(s);
     if (isSessionActive() || getAuthToken()) {
-      // Cloud save first, then rebuild defense from server copy
       pushSave(s)
-        .then(() => {
+        .then((res) => {
+          if (res && 'conflict' in res && res.conflict) {
+            const body = (res as any).body || {};
+            const msg = body.message;
+            const serverSave =
+              body.server ||
+              (msg && typeof msg === 'object' ? msg.server : null);
+            if (serverSave && typeof serverSave === 'object') {
+              const merged = migrateState(serverSave);
+              writeSave(merged);
+              setState(merged);
+              flash(t('saveConflictResolved'));
+              return;
+            }
+            flash(t('saveConflict'));
+            return;
+          }
           if (s?.warriors?.length) return putPvpDefense();
         })
         .catch(() => {});
     }
+  }
+
+  function chooseNewerSave(local: any, cloud: any) {
+    const l = Number(local?.updatedAt) || 0;
+    const c = Number(cloud?.updatedAt) || 0;
+    if (!local) return cloud;
+    if (!cloud) return local;
+    return c >= l ? cloud : local;
   }
 
   function chooseLang(l: 'en' | 'ru') {
@@ -260,9 +299,11 @@ export function GameShell() {
           const cloud = await pullSave();
           const c = cloud?.save as any;
           if (c && typeof c === 'object') {
-            if (!raw || (Number(c.updatedAt) || 0) >= (Number(raw.updatedAt) || 0)) {
-              raw = c;
+            const picked = chooseNewerSave(raw, c);
+            if (picked === c && raw && Number(c.updatedAt) !== Number(raw.updatedAt)) {
+              flash(t('saveLoadedCloud'));
             }
+            raw = picked;
           }
         }
       } catch {
@@ -276,6 +317,7 @@ export function GameShell() {
       setState(s);
       persist(s);
       setScreen('hub');
+      setHubTab('quests');
     })();
   }
 
@@ -431,6 +473,7 @@ export function GameShell() {
 
   async function doLogout() {
     await logoutPlayer();
+    disconnectRealtime();
     setPlayer(null);
     setBootStep('auth');
     setAuthEmail('');
@@ -440,9 +483,24 @@ export function GameShell() {
 
   function refresh() {
     if (!state) return;
+    const newly = notifyQuestCompletions(state);
+    syncQuestObjectives(state);
     persist(state);
     setState({ ...state });
+    if (newly.length) {
+      flash(`${t('questJustDone')}: ${newly.map((q) => t(q.labelKey)).join(', ')}`);
+    }
   }
+
+  useEffect(() => {
+    if (screen !== 'hub' || !state) return;
+    syncQuestObjectives(state);
+    const hint = activeQuestHint(state);
+    const { done, total } = questsSummary(state);
+    if (!hint || done >= total) return;
+    if (state.flags?.questPopupDismissed === hint.id) return;
+    setQuestPopup({ labelKey: hint.labelKey, detailKey: hint.detailKey, tab: hint.tab });
+  }, [screen, state?.updatedAt, hubTab]);
 
   function beginDeploy(missionId: string, difficulty: string) {
     if (!isMissionUnlocked(state, missionId)) {
@@ -476,6 +534,7 @@ export function GameShell() {
     displayName?: string;
     avatarKey?: string | null;
     isBot?: boolean;
+    liveMatchId?: string;
     squad: { warriors: any[]; items: Record<string, any>; power?: number };
   }) {
     if (!state?.warriors?.length) {
@@ -483,12 +542,13 @@ export function GameShell() {
       return;
     }
     const isBot = !!opponent.isBot || opponent.playerId.startsWith('bot_');
+    const isLive = !!opponent.liveMatchId;
     let squad = opponent.squad;
     let matchId: string | null = null;
     let displayName = opponent.displayName;
     let avatarKey = opponent.avatarKey;
 
-    if (!isBot) {
+    if (!isBot && !isLive) {
       if (!isSessionActive() && !getAuthToken()) {
         flash(t('pvpNeedLogin'));
         return;
@@ -501,12 +561,20 @@ export function GameShell() {
         avatarKey = ch.opponent.avatarKey;
       } catch (e: any) {
         const msg = e?.data?.message || e?.message || '';
-        if (msg === 'defender_cooldown') flash(t('pvpCooldownCooldown'));
+        if (msg === 'defender_cooldown') flash(t('pvpDefCooldown'));
         else if (msg === 'match_rate_limited' || msg === 'rate_limited') flash(t('authRateLimited'));
         else if (msg === 'no_cloud_save' || msg === 'empty_squad') flash(t('pvpDefenseNeed'));
         else flash(t('pvpChallengeFail'));
         return;
       }
+    }
+
+    if (isLive) {
+      setLiveMatchId(opponent.liveMatchId || null);
+      setPvpMatchId(null);
+    } else {
+      setLiveMatchId(null);
+      setPvpMatchId(matchId);
     }
 
     const cap = deployCap(state);
@@ -515,7 +583,6 @@ export function GameShell() {
     selected.forEach((id: string, i: number) => {
       positions[id] = { x: 1, y: Math.min(9, 1 + i) };
     });
-    setPvpMatchId(matchId);
     setDeploy({
       kind: 'pvp',
       missionId: 'pvp_arena',
@@ -526,8 +593,10 @@ export function GameShell() {
       opponentName: displayName,
       opponentAvatar: avatarKey,
       opponentId: opponent.playerId,
-      matchId,
+      matchId: isLive ? opponent.liveMatchId : matchId,
+      liveMatchId: opponent.liveMatchId || null,
       isBot,
+      isLive,
     });
     setScreen('deploy');
   }
@@ -541,8 +610,13 @@ export function GameShell() {
     if (isPvp) {
       if (mode === 'victory') {
         res = applyPvpVictory(state, b);
+        markPvpWin(state);
+        const newly = notifyQuestCompletions(state);
         persist(state);
         setState({ ...state });
+        if (newly.length) {
+          flash(`${t('questJustDone')}: ${newly.map((q) => t(q.labelKey)).join(', ')}`);
+        }
       } else {
         res = applyPvpDefeat(state, b);
       }
@@ -555,10 +629,19 @@ export function GameShell() {
         });
         setPvpMatchId(null);
       }
+      if (liveMatchId || deploy?.liveMatchId) {
+        const mid = liveMatchId || deploy?.liveMatchId;
+        connectRealtime().emit('live:finish', { matchId: mid, victory: mode === 'victory' });
+        setLiveMatchId(null);
+      }
     } else if (mode === 'victory') {
       res = applyVictoryRewards(state, b);
+      const newly = notifyQuestCompletions(state);
       persist(state);
       setState({ ...state });
+      if (newly.length) {
+        flash(`${t('questJustDone')}: ${newly.map((q) => t(q.labelKey)).join(', ')}`);
+      }
     } else {
       res.summary = buildBattleSummary(state, b, {}, []);
     }
@@ -1001,6 +1084,7 @@ export function GameShell() {
         {(
           [
             ['campaign', t('campaign')],
+            ['quests', t('quests')],
             ['arena', t('pvp')],
             ['mine', t('mine')],
             ['forge', t('forge')],
@@ -1089,6 +1173,43 @@ export function GameShell() {
             </button>
           </div>
         ) : null}
+        {questPopup ? (
+          <div className="hub-banner quest-popup">
+            <div>
+              <b>{t('questActive')}: {t(questPopup.labelKey)}</b>
+              <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
+                {t(questPopup.detailKey)}
+              </p>
+            </div>
+            <div className="row" style={{ gap: 6 }}>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  const tab = questPopup.tab as HubTab;
+                  setQuestPopup(null);
+                  if (tab === 'arena') setHubTab('arena');
+                  else setHubTab(tab);
+                }}
+              >
+                {t('continue')}
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  if (state && questPopup) {
+                    state.flags = { ...(state.flags || {}), questPopupDismissed: activeQuestHint(state)?.id };
+                    persist(state);
+                  }
+                  setQuestPopup(null);
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        ) : null}
         {guideSteps.length ? (
           <div className="hub-guide">
             <div className="hub-guide-label muted">{t('guideNext')}</div>
@@ -1119,12 +1240,38 @@ export function GameShell() {
         ) : null}
         <div className="panel">
           {hubTab === 'campaign' && <CampaignView state={state} onFight={beginDeploy} />}
+          {hubTab === 'quests' && (
+            <QuestsView
+              state={state}
+              refresh={refresh}
+              flash={flash}
+              goTab={(tab) => setHubTab(tab as HubTab)}
+            />
+          )}
           {hubTab === 'arena' && (
             <PvpView
               state={state}
               player={player}
               flash={flash}
               onAttack={(op) => void beginPvp(op)}
+              onLiveMatch={(ev: LiveMatchedEvent) => {
+                if (!ev.opponent?.warriors?.length) {
+                  flash(t('pvpDefenseNeed'));
+                  return;
+                }
+                void beginPvp({
+                  playerId: ev.opponentId,
+                  displayName: ev.opponent.displayName,
+                  avatarKey: ev.opponent.avatarKey,
+                  isBot: false,
+                  liveMatchId: ev.matchId,
+                  squad: {
+                    warriors: ev.opponent.warriors,
+                    items: ev.opponent.items || {},
+                    power: ev.opponent.power,
+                  },
+                });
+              }}
               onPostDefense={async () => {
                 if (!isSessionActive() && !getAuthToken()) {
                   flash(t('pvpNeedLogin'));
@@ -1138,6 +1285,9 @@ export function GameShell() {
                   // Ensure latest save is on server before building defense
                   await pushSave(state);
                   await putPvpDefense();
+                  markPvpDefensePosted(state);
+                  persist(state);
+                  setState({ ...state });
                   flash(t('pvpDefenseOk'));
                 } catch (e: any) {
                   const msg = e?.data?.message || e?.message || '';

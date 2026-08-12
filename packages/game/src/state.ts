@@ -374,7 +374,7 @@ export function createInitialState(lang = 'en') {
       cleared: {},
       unlockedRegions: ['fields'],
     },
-    flags: { tutorialSeen: false, loopSeen: false },
+    flags: { tutorialSeen: false, loopSeen: false, quests: { done: {}, claimed: {} } },
     energy: defaultEnergy(),
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -428,6 +428,7 @@ export function migrateState(state) {
   if (!state.resources) state.resources = {};
   if (!state.campaign) state.campaign = { cleared: {}, unlockedRegions: ['fields'] };
   if (!state.flags) state.flags = {};
+  if (!state.flags.quests) state.flags.quests = { done: {}, claimed: {} };
   if (state.sparks == null) state.sparks = 0;
   if (state.flags.loopSeen == null) state.flags.loopSeen = !!state.campaign?.cleared && Object.keys(state.campaign.cleared).length > 0;
   ensureEnergy(state);
@@ -667,7 +668,8 @@ export function dismantleReturn(item) {
 }
 
 export function barracksUpgradeCost(level) {
-  return { gold: 100 * level, iron_bar: level >= 2 ? level : 0 };
+  const lv = Math.max(1, level | 0);
+  return { gold: 80 + 90 * (lv - 1), iron_bar: lv >= 2 ? lv : 0 };
 }
 
 export function listResearchable(state) {

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { sanitizeCloudSave } from './sanitize-save';
+import { logMetric } from '../metrics/metrics';
 
 export type SaveBlob = {
   updatedAt?: number;
@@ -45,6 +46,7 @@ export class SaveService {
         typeof existingBlob?.updatedAt === 'number' &&
         existingBlob.updatedAt > body.updatedAt
       ) {
+        logMetric('save_conflict', { playerId });
         return {
           conflict: true as const,
           server: existingBlob,

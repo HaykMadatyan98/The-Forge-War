@@ -1,7 +1,7 @@
 import { BLUEPRINTS, RESOURCES, MINEABLE, SMELT_RECIPES } from './catalog';
 
 /** Hub stamina for economy jobs (mine / smelt / craft). */
-export const ENERGY_MAX = 30;
+export const ENERGY_MAX = 35;
 /** 1 energy restored every N ms while below max. */
 export const ENERGY_REGEN_MS = 2 * 60 * 1000; // 2 minutes per point
 /** Energy from a single rewarded-ad claim. */

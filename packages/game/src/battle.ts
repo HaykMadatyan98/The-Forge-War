@@ -278,12 +278,15 @@ export function attackPreview(battle, attacker, target) {
 
 export function tryMove(battle, unit, x, y) {
   if (!unit || unit.acted) return false;
+  if (unit.movePts <= 0) return false;
   const { best } = moveRange(unit, battle.map, battle.units);
   const key = `${x},${y}`;
   if (!best.has(key)) return false;
+  const spent = best.get(key) || 0;
+  if (spent <= 0) return false;
   unit.x = x;
   unit.y = y;
-  unit.movePts = unit.stats.move - best.get(key);
+  unit.movePts = Math.max(0, (unit.movePts || 0) - spent);
   unit.moved = true;
   return true;
 }

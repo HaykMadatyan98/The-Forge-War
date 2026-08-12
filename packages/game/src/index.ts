@@ -7,6 +7,7 @@ export * from './battle';
 export * from './campaign';
 export * from './save';
 export * from './hubGuide';
+export * from './quests';
 export * from './energy';
 export * from './profile';
 export * from './pvp';

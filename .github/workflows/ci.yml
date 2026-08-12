@@ -60,3 +60,14 @@ jobs:
         run: npm run build -w @tfw/web
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8787/v1
+
+      - name: Install Playwright
+        run: npx playwright install chromium --with-deps
+
+      - name: E2E smoke (web + api)
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: postgresql://tfw:tfw_ci_test@localhost:5433/tfw?schema=public
+          WEB_ORIGIN: http://127.0.0.1:3000
+          RETURN_VERIFY_TOKEN_ON_MAIL_FAIL: '1'
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8787/v1

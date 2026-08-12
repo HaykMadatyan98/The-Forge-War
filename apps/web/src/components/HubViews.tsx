@@ -71,9 +71,22 @@ import {
   extractDefenseSquad,
   pvpThreat,
   pvpThreatLabelKey,
+  barracksUpgradeCost,
+  spendMats,
+  questList,
+  questsSummary,
+  claimQuestReward,
+  syncQuestObjectives,
 } from '@tfw/game';
 import { fetchMyPvp, fetchPvpOpponents, type PvpOpponent, type PublicPlayer } from '@/lib/api';
-import { connectRealtime, type LiveMatchedEvent } from '@/lib/realtime';
+import {
+  connectRealtime,
+  reconnectRealtime,
+  subscribeRealtimeStatus,
+  LIVE_QUEUE_TIMEOUT_MS,
+  type LiveMatchedEvent,
+  type RealtimeStatus,
+} from '@/lib/realtime';
 import { IconGold, IconRes, IconSlot, IconSpark, IconWeapon, Portrait, Stars } from './icons';
 import { AccountAvatar } from './AccountAvatar';
 import { FancySelect, StatGrid, SubTabs, CostList } from './ui';
@@ -784,6 +797,8 @@ export function BarracksView({ state, refresh, flash }: { state: any; refresh: (
   const idx = state.warriors.findIndex((x: any) => x.id === w.id);
   const st = effectiveStats(w, state.items);
   const activeW = primaryWeaponType(w, state.items);
+  const barracksCost = barracksUpgradeCost(state.barracksLevel || 1);
+  const canUpgradeBarracks = (state.barracksLevel || 1) < 5 && hasMats(state, barracksCost);
 
   function equipTo(slot: string, itemId: string) {
     const res = equipOnWarrior(state, w, slot, itemId);
@@ -812,8 +827,40 @@ export function BarracksView({ state, refresh, flash }: { state: any; refresh: (
           <p className="muted">
             {t('deployCap')} {deployCap(state)} · {t('rosterCap')} {rosterCap(state)} · Lv {state.barracksLevel}
           </p>
+          {(state.barracksLevel || 1) < 5 ? (
+            <div className="muted" style={{ fontSize: '0.82rem', marginTop: 4 }}>
+              {t('barracksUpgradeHint')}
+            </div>
+          ) : (
+            <div className="muted" style={{ fontSize: '0.82rem', marginTop: 4 }}>
+              {t('barracksMaxLevel')}
+            </div>
+          )}
         </div>
         <div className="row">
+          {(state.barracksLevel || 1) < 5 ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={!canUpgradeBarracks}
+              onClick={() => {
+                if (!canUpgradeBarracks) {
+                  const miss = matBreakdown(state, barracksCost)
+                    .filter((r) => !r.ok)
+                    .map((r) => `${t(r.key)} (${r.missing})`)
+                    .join(', ');
+                  flash(miss ? `${t('missing')}: ${miss}` : t('noMats'));
+                  return;
+                }
+                spendMats(state, barracksCost);
+                state.barracksLevel = Math.min(5, (state.barracksLevel || 1) + 1);
+                refresh();
+                flash(`${t('barracksUpgraded')} Lv ${state.barracksLevel}`);
+              }}
+            >
+              {t('barracksUpgrade')}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -936,6 +983,38 @@ export function BarracksView({ state, refresh, flash }: { state: any; refresh: (
           <section className="barracks-panel">
             <h4 style={{ margin: '0 0 0.5rem' }}>{t('stats')}</h4>
             <StatGrid stats={{ ...st, move: st.move }} />
+            <div className="card" style={{ marginTop: '0.65rem', padding: '0.55rem 0.7rem' }}>
+              <div className="muted" style={{ fontSize: '0.82rem' }}>
+                {t('statHelpTitle')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem', marginTop: 4 }}>
+                {t('atk')}: {t('statHelpAtk')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('def')}: {t('statHelpDef')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('spd')}: {t('statHelpSpd')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('acc')}: {t('statHelpAcc')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('eva')}: {t('statHelpEva')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('crit')}: {t('statHelpCrit')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('blk')}: {t('statHelpBlk')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('sta')}: {t('statHelpSta')}
+              </div>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {t('movePts')}: {t('statHelpMove')}
+              </div>
+            </div>
           </section>
         ) : null}
 
@@ -1251,12 +1330,118 @@ function GearBonusLine({ base }: { base: Record<string, number> }) {
   );
 }
 
+export function QuestsView({
+  state,
+  refresh,
+  flash,
+  goTab,
+}: {
+  state: any;
+  refresh: () => void;
+  flash: (m: string) => void;
+  goTab: (tab: string) => void;
+}) {
+  syncQuestObjectives(state);
+  const summary = questsSummary(state);
+  const list = questList(state);
+  const pct = Math.round((summary.pct || 0) * 100);
+
+  return (
+    <>
+      <div className="panel-header">
+        <div>
+          <h2>{t('quests')}</h2>
+          <p className="muted">{t('questsHint')}</p>
+        </div>
+        <div className="muted">
+          {t('questsProgress')}: {summary.done}/{summary.total}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '0.85rem', padding: '0.65rem 0.75rem' }}>
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+          <span className="muted" style={{ fontSize: '0.82rem' }}>
+            {t('questsProgress')}
+          </span>
+          <b>{pct}%</b>
+        </div>
+        <div className="progress">
+          <i style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {summary.next ? (
+        <div className="card quest-active-banner" style={{ marginBottom: '0.85rem' }}>
+          <div className="muted">{t('questActive')}</div>
+          <b>{t(summary.next.labelKey)}</b>
+          <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.88rem' }}>
+            {t(summary.next.detailKey)}
+          </p>
+          <button type="button" className="primary" style={{ marginTop: '0.5rem' }} onClick={() => goTab(summary.next!.tab)}>
+            {t('continue')}
+          </button>
+        </div>
+      ) : null}
+
+      <div className="quest-list">
+        {list.map((q) => (
+          <div className={`card quest-card ${q.done ? 'done' : ''} ${q.canClaim ? 'claimable' : ''}`} key={q.id}>
+            <div className="row" style={{ justifyContent: 'space-between', gap: '0.5rem' }}>
+              <div>
+                <b>
+                  {q.done ? '✓ ' : ''}
+                  {t(q.labelKey)}
+                </b>
+                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
+                  {t(q.detailKey)}
+                </p>
+                <span className="muted" style={{ fontSize: '0.8rem' }}>
+                  {t('questRewardGold')}: {q.rewardGold} {t('gold')}
+                  {q.rewardSparks ? ` · ${q.rewardSparks} ${t('sparks')}` : ''}
+                </span>
+              </div>
+              <div className="row" style={{ flexShrink: 0, gap: 6 }}>
+                {q.canClaim ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      const res = claimQuestReward(state, q.id);
+                      if (!res.ok) {
+                        flash(res.err || 'err');
+                        return;
+                      }
+                      refresh();
+                      flash(
+                        `+${res.gold} ${t('gold')}${res.sparks ? ` · +${res.sparks} ${t('sparks')}` : ''}`,
+                      );
+                    }}
+                  >
+                    {t('questClaim')}
+                  </button>
+                ) : q.claimed ? (
+                  <span className="badge">{t('questClaimed')}</span>
+                ) : !q.done ? (
+                  <button type="button" className="ghost" onClick={() => goTab(q.tab)}>
+                    {t('continue')}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function PvpView({
   state,
   player,
   flash,
   onAttack,
   onPostDefense,
+  onLiveMatch,
 }: {
   state: any;
   player: PublicPlayer | null;
@@ -1266,9 +1451,11 @@ export function PvpView({
     displayName?: string;
     avatarKey?: string | null;
     isBot?: boolean;
+    liveMatchId?: string;
     squad: { warriors: any[]; items: Record<string, any>; power?: number };
   }) => void;
   onPostDefense: () => Promise<void> | void;
+  onLiveMatch?: (ev: LiveMatchedEvent) => void;
 }) {
   const [mode, setMode] = useState<'players' | 'ai'>('players');
   const [opponents, setOpponents] = useState<PvpOpponent[]>([]);
@@ -1282,6 +1469,8 @@ export function PvpView({
   const [posting, setPosting] = useState(false);
   const [liveStatus, setLiveStatus] = useState<'idle' | 'queued' | 'matched'>('idle');
   const [liveMatch, setLiveMatch] = useState<LiveMatchedEvent | null>(null);
+  const [rtStatus, setRtStatus] = useState<RealtimeStatus | null>(null);
+  const [queueStartedAt, setQueueStartedAt] = useState<number | null>(null);
   const myPower = extractDefenseSquad(state).power || 0;
   const defenseStale =
     !!mine && Math.abs((mine.power || 0) - myPower) >= 8;
@@ -1306,30 +1495,97 @@ export function PvpView({
 
   useEffect(() => {
     if (!player) return;
+    connectRealtime();
+    return subscribeRealtimeStatus(setRtStatus);
+  }, [player?.id]);
+
+  function startFromLiveMatch(ev: LiveMatchedEvent) {
+    setLiveStatus('matched');
+    setLiveMatch(ev);
+    setQueueStartedAt(null);
+    flash(t('livePvpMatched') || 'Live match found!');
+    if (!ev.opponent?.warriors?.length) {
+      flash(t('pvpDefenseNeed'));
+      return;
+    }
+    if (onLiveMatch) {
+      onLiveMatch(ev);
+      return;
+    }
+    onAttack({
+      playerId: ev.opponentId,
+      displayName: ev.opponent.displayName,
+      avatarKey: ev.opponent.avatarKey,
+      isBot: false,
+      liveMatchId: ev.matchId,
+      squad: {
+        warriors: ev.opponent.warriors,
+        items: ev.opponent.items || {},
+        power: ev.opponent.power,
+      },
+    });
+  }
+
+  useEffect(() => {
+    if (!player) return;
     const sock = connectRealtime();
-    const onMatched = (ev: LiveMatchedEvent) => {
-      setLiveStatus('matched');
-      setLiveMatch(ev);
-      flash(t('livePvpMatched') || 'Live match found!');
-    };
+    const onMatched = (ev: LiveMatchedEvent) => startFromLiveMatch(ev);
     sock.on('live:matched', onMatched);
     return () => {
       sock.off('live:matched', onMatched);
     };
-  }, [player, flash]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player?.id]);
+
+  useEffect(() => {
+    if (liveStatus !== 'queued' || !queueStartedAt) return;
+    const id = window.setTimeout(() => {
+      connectRealtime().emit('live:leave');
+      setLiveStatus('idle');
+      setQueueStartedAt(null);
+      flash(t('livePvpQueueTimeout'));
+    }, LIVE_QUEUE_TIMEOUT_MS);
+    return () => window.clearTimeout(id);
+  }, [liveStatus, queueStartedAt, flash]);
+
+  function liveStatusLabel() {
+    if (!rtStatus) return t('livePvpStatusDisconnected');
+    if (rtStatus.reconnecting) return t('livePvpStatusReconnecting');
+    if (rtStatus.connecting) return t('livePvpStatusConnecting');
+    if (rtStatus.connected) return t('livePvpStatusConnected');
+    return t('livePvpStatusDisconnected');
+  }
 
   function joinLiveQueue() {
     if (!player) return;
+    if (!mine) {
+      flash(t('pvpDefenseMissing'));
+      return;
+    }
+    if (!rtStatus?.connected && !rtStatus?.connecting) {
+      connectRealtime();
+      flash(t('livePvpNeedConnection'));
+      return;
+    }
     const sock = connectRealtime();
     setLiveStatus('queued');
-    sock.emit('live:queue', {}, (res: { status?: string; error?: string }) => {
-      if (res?.error) {
-        setLiveStatus('idle');
-        flash(t('livePvpFail') || 'Queue failed');
-      } else if (res?.status === 'queued') {
-        flash(t('livePvpQueued') || 'Searching opponent…');
-      }
-    });
+    setQueueStartedAt(Date.now());
+    sock.emit(
+      'live:queue',
+      {},
+      (res: LiveMatchedEvent & { status?: string; error?: string }) => {
+        if (res?.error) {
+          setLiveStatus('idle');
+          setQueueStartedAt(null);
+          if (res.error === 'need_defense') flash(t('pvpDefenseMissing'));
+          else flash(t('livePvpFail') || 'Queue failed');
+        } else if (res?.status === 'matched' || (res as any).matchId) {
+          startFromLiveMatch(res as LiveMatchedEvent);
+        } else if (res?.status === 'queued') {
+          flash(t('livePvpQueued') || 'Searching opponent…');
+        }
+      },
+    );
   }
 
   async function postDefense() {
@@ -1392,12 +1648,31 @@ export function PvpView({
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3>{t('livePvp') || 'Live PvP'}</h3>
           <p className="muted">{t('livePvpHint') || 'Real-time matchmaking via WebSocket'}</p>
+          <p className="muted" style={{ fontSize: '0.82rem' }}>
+            {t('livePvpFightHint')}
+          </p>
+          <div
+            className={`live-pvp-status ${rtStatus?.connected ? 'ok' : rtStatus?.connecting || rtStatus?.reconnecting ? 'warn' : 'bad'}`}
+            style={{ fontSize: '0.82rem', marginBottom: '0.5rem' }}
+          >
+            {liveStatusLabel()}
+            {rtStatus?.lastError && !rtStatus.connected ? (
+              <span className="muted"> · {rtStatus.lastError}</span>
+            ) : null}
+          </div>
           {liveMatch ? (
             <p>
-              {t('livePvpOpponent') || 'Opponent'}: <b>{liveMatch.opponentId.slice(0, 8)}…</b>
+              {t('livePvpOpponent') || 'Opponent'}:{' '}
+              <b>{liveMatch.opponent?.displayName || `${liveMatch.opponentId.slice(0, 8)}…`}</b>
+              {liveMatch.opponent?.power ? (
+                <span className="muted">
+                  {' '}
+                  · {t('pvpPower')} {liveMatch.opponent.power}
+                </span>
+              ) : null}
             </p>
           ) : null}
-          <div className="row" style={{ gap: '0.5rem', marginTop: '0.5rem' }}>
+          <div className="row" style={{ gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="primary"
@@ -1406,6 +1681,11 @@ export function PvpView({
             >
               {liveStatus === 'queued' ? t('livePvpSearching') || 'Searching…' : t('livePvpJoin') || 'Find match'}
             </button>
+            {!rtStatus?.connected ? (
+              <button type="button" className="ghost" onClick={() => reconnectRealtime()}>
+                {t('livePvpReconnect')}
+              </button>
+            ) : null}
             {liveStatus !== 'idle' ? (
               <button
                 type="button"
@@ -1414,6 +1694,7 @@ export function PvpView({
                   connectRealtime().emit('live:leave');
                   setLiveStatus('idle');
                   setLiveMatch(null);
+                  setQueueStartedAt(null);
                 }}
               >
                 {t('cancel') || 'Cancel'}

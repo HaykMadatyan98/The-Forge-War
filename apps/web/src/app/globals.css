@@ -2113,3 +2113,38 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
+
+.quest-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.quest-card.done {
+  border-color: rgba(120, 200, 120, 0.35);
+}
+
+.quest-card.claimable {
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.15);
+}
+
+.quest-active-banner {
+  border-color: var(--accent2);
+}
+
+.quest-popup {
+  border-color: var(--accent2);
+  background: linear-gradient(90deg, rgba(58, 42, 20, 0.95), rgba(42, 30, 18, 0.95));
+}
+
+.live-pvp-status.ok {
+  color: var(--good);
+}
+
+.live-pvp-status.warn {
+  color: var(--accent2);
+}
+
+.live-pvp-status.bad {
+  color: var(--bad);
+}

@@ -349,7 +349,7 @@ export const REGIONS = [
         id: 'fields_1',
         enemies: 2,
         enemyLvl: 1,
-        reward: { gold: 70, copper_ore: 10, softwood: 8, coal: 3 },
+        reward: { gold: 85, copper_ore: 12, softwood: 10, coal: 4 },
         unlockResources: ['iron_ore', 'hardwood'],
       },
       {
@@ -480,15 +480,15 @@ export function levelXpToNext(level) {
 
 /** Enough bars/planks for 2 starter weapons without waiting on the mine. */
 export const STARTER_RESOURCE = {
-  gold: 200,
-  sparks: 8,
-  copper_ore: 12,
-  copper_bar: 6,
-  softwood: 10,
-  softwood_plank: 4,
+  gold: 260,
+  sparks: 10,
+  copper_ore: 14,
+  copper_bar: 8,
+  softwood: 12,
+  softwood_plank: 6,
   scrap_hide: 10,
   scrap_leather: 4,
-  coal: 6,
+  coal: 8,
 };
 
 export const SAVE_KEY = 'tfw_campaign_v1';
