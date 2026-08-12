@@ -118,6 +118,8 @@ export async function registerPlayer(body: {
     email: string;
     message: string;
     devVerifyToken?: string;
+    verifyToken?: string;
+    emailDeliveryFailed?: boolean;
   };
 }
 
@@ -153,7 +155,13 @@ export async function resendVerification(email: string) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw parseError(data, 'resend_failed');
-  return data as { ok: true; message: string; devVerifyToken?: string };
+  return data as {
+    ok: true;
+    message: string;
+    devVerifyToken?: string;
+    verifyToken?: string;
+    emailDeliveryFailed?: boolean;
+  };
 }
 
 export type OauthConfig = {

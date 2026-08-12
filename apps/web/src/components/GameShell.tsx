@@ -311,6 +311,13 @@ export function GameShell() {
         setAwaitingVerify(true);
         flash(t('authCheckEmail'));
         if (reg.devVerifyToken) console.info('[dev] verify token', reg.devVerifyToken);
+        if (reg.verifyToken) {
+          await finishAuth(await verifyEmailToken(reg.verifyToken));
+          return;
+        }
+        if (reg.emailDeliveryFailed) {
+          flash(t('authMailFailed') || t('authCheckEmail'));
+        }
         return;
       }
       const res = await loginPlayer({ email: authEmail, password: authPass });
@@ -346,6 +353,13 @@ export function GameShell() {
       const r = await resendVerification(authEmail);
       flash(t('authCheckEmail'));
       if (r.devVerifyToken) console.info('[dev] verify token', r.devVerifyToken);
+      if (r.verifyToken) {
+        await finishAuth(await verifyEmailToken(r.verifyToken));
+        return;
+      }
+      if (r.emailDeliveryFailed) {
+        flash(t('authMailFailed') || t('authCheckEmail'));
+      }
     } catch {
       flash(t('authFail'));
     } finally {
@@ -762,6 +776,25 @@ export function GameShell() {
                 >
                   {t('authResendVerify')}
                 </button>
+              ) : null}
+              {awaitingVerify ? (
+                <div
+                  className="card"
+                  style={{
+                    marginTop: '0.75rem',
+                    padding: '0.65rem 0.75rem',
+                    borderColor: 'var(--accent2)',
+                    background: 'rgba(201,162,39,0.08)',
+                  }}
+                >
+                  <b>{t('authVerifyPendingTitle')}</b>
+                  <p className="muted" style={{ margin: '0.35rem 0 0' }}>
+                    {t('authVerifyPendingBody')} <b>{authEmail || '—'}</b>
+                  </p>
+                  <p className="muted" style={{ margin: '0.3rem 0 0', fontSize: '0.85rem' }}>
+                    {t('authVerifyPendingTip')}
+                  </p>
+                </div>
               ) : null}
             </form>
 
