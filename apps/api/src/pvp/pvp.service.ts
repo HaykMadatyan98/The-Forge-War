@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { squadFromCloudSave } from './squadFromSave';
+import { BattleService } from '../battle/battle.service';
 
 type PublicPlayer = {
   id: string;
@@ -21,7 +22,10 @@ const MAX_WINS_REPORTED_PER_DAY = 40;
 
 @Injectable()
 export class PvpService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly battle: BattleService,
+  ) {}
 
   /**
    * Defense board is built only from the player's cloud save — client body ignored.
@@ -212,7 +216,12 @@ export class PvpService {
     };
   }
 
-  async recordResult(attackerId: string, matchId: string, victory: boolean) {
+  async recordResult(
+    attackerId: string,
+    matchId: string,
+    victory: boolean,
+    deploy?: { warriorIds?: string[]; positions?: { x: number; y: number }[] },
+  ) {
     if (!matchId) throw new BadRequestException('missing_match');
 
     const match = await this.prisma.pvpMatch.findUnique({ where: { id: matchId } });
@@ -230,7 +239,36 @@ export class PvpService {
     }
     if (match.status !== 'open') throw new BadRequestException('invalid_match_status');
 
-    if (victory) {
+    let acceptedVictory = !!victory;
+    if (victory && process.env.VALIDATE_PVP !== '0') {
+      const saveRow = await this.prisma.gameSave.findUnique({ where: { playerId: attackerId } });
+      const defense = await this.prisma.pvpDefense.findUnique({ where: { playerId: match.defenderId } });
+      if (saveRow && defense && deploy?.warriorIds?.length) {
+        try {
+          const state = JSON.parse(saveRow.data) as Record<string, unknown>;
+          const squad = this.parseSquad(defense.squadJson);
+          const check = await this.battle.validatePvpResult(
+            state,
+            { warriors: squad.warriors || [], items: squad.items || {}, power: defense.power },
+            deploy.warriorIds,
+            deploy.positions || [],
+            matchId,
+            true,
+          );
+          if (!check.accepted) {
+            throw new ForbiddenException('result_rejected');
+          }
+          if (!check.simulatedVictory && !check.softPass) {
+            acceptedVictory = false;
+          }
+        } catch (e) {
+          if (e instanceof ForbiddenException) throw e;
+          /* validation soft-fail — trust client if sim breaks */
+        }
+      }
+    }
+
+    if (acceptedVictory) {
       const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const winsToday = await this.prisma.pvpMatch.count({
         where: {
@@ -249,7 +287,7 @@ export class PvpService {
       where: { id: match.id },
       data: {
         status: 'resolved',
-        victory: !!victory,
+        victory: acceptedVictory,
         resolvedAt: new Date(),
       },
     });
@@ -258,17 +296,17 @@ export class PvpService {
     if (opp) {
       await this.prisma.pvpDefense.update({
         where: { playerId: match.defenderId },
-        data: victory ? { losses: { increment: 1 } } : { wins: { increment: 1 } },
+        data: acceptedVictory ? { losses: { increment: 1 } } : { wins: { increment: 1 } },
       });
     }
 
     await this.prisma.pvpDefense
       .updateMany({
         where: { playerId: attackerId },
-        data: victory ? { wins: { increment: 1 } } : { losses: { increment: 1 } },
+        data: acceptedVictory ? { wins: { increment: 1 } } : { losses: { increment: 1 } },
       })
       .catch(() => {});
 
-    return { ok: true, matchId: match.id, victory: !!victory };
+    return { ok: true, matchId: match.id, victory: acceptedVictory };
   }
 }

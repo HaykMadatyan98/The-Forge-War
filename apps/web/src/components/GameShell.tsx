@@ -42,6 +42,8 @@ import {
   startPvpChallenge,
   verifyEmailToken,
   resendVerification,
+  forgotPassword,
+  resetPassword,
   type PublicPlayer,
   type OauthConfig,
 } from '@/lib/api';
@@ -59,6 +61,8 @@ import {
   TavernView,
 } from './HubViews';
 import { MissionScreen } from './DeployBattle';
+import { SocialPanel } from './SocialPanel';
+import { connectRealtime } from '@/lib/realtime';
 
 type Screen = 'boot' | 'hub' | 'deploy' | 'battle' | 'summary' | 'levelup' | 'briefing';
 type HubTab =
@@ -70,7 +74,8 @@ type HubTab =
   | 'barracks'
   | 'tavern'
   | 'inventory'
-  | 'profile';
+  | 'profile'
+  | 'social';
 
 export function GameShell() {
   const [lang, setLangState] = useState<'en' | 'ru'>('en');
@@ -97,6 +102,9 @@ export function GameShell() {
   const [profileNick, setProfileNick] = useState('');
   const [profileAvatar, setProfileAvatar] = useState('p0');
   const [pvpMatchId, setPvpMatchId] = useState<string | null>(null);
+  const [pvpDeploy, setPvpDeploy] = useState<{ ids: string[]; positions: { x: number; y: number }[] } | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
+  const [resetToken, setResetToken] = useState('');
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
   const [oauthCfg, setOauthCfg] = useState<OauthConfig | null>(null);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
@@ -129,6 +137,15 @@ export function GameShell() {
     try {
       const params = new URLSearchParams(window.location.search);
       const vt = params.get('verifyEmail');
+      const rt = params.get('resetPassword');
+      if (rt) {
+        setResetToken(rt);
+        setAuthMode('reset');
+        setBootStep('auth');
+        params.delete('resetPassword');
+        const qs = params.toString();
+        window.history.replaceState({}, '', qs ? `?${qs}` : window.location.pathname);
+      }
       if (vt) {
         void verifyEmailToken(vt)
           .then(async (res) => {
@@ -269,6 +286,7 @@ export function GameShell() {
     setProfileNick(res.player.displayName || '');
     setProfileAvatar(res.player.avatarKey || 'p0');
     setBootStep('menu');
+    connectRealtime();
     flash(`${t('authOk')}: ${res.player.displayName || res.player.email}`);
     try {
       const cloud = await pullSave();
@@ -515,7 +533,12 @@ export function GameShell() {
         res = applyPvpDefeat(state, b);
       }
       if (pvpMatchId) {
-        void reportPvpResult(pvpMatchId, mode === 'victory');
+        const ids = deploy?.selected || [];
+        const positions = ids.map((id: string) => deploy?.positions?.[id] || { x: 1, y: 2 });
+        void reportPvpResult(pvpMatchId, mode === 'victory', {
+          deployWarriorIds: ids,
+          deployPositions: positions,
+        });
         setPvpMatchId(null);
       }
     } else if (mode === 'victory') {
@@ -679,6 +702,57 @@ export function GameShell() {
               >
                 {authBusy ? '…' : authTab === 'register' ? t('authRegister') : t('authLogin')}
               </button>
+              {authTab === 'login' ? (
+                <button
+                  type="button"
+                  className="ghost boot-submit"
+                  disabled={authBusy}
+                  onClick={() => {
+                    setAuthMode('forgot');
+                    void (async () => {
+                      if (!authEmail.trim()) {
+                        flash(t('authEmail'));
+                        return;
+                      }
+                      setAuthBusy(true);
+                      try {
+                        const r = await forgotPassword(authEmail);
+                        flash(t('authCheckEmail'));
+                        if (r.devResetToken) console.info('[dev] reset token', r.devResetToken);
+                      } catch {
+                        flash(t('authResetFail') || 'Reset failed');
+                      } finally {
+                        setAuthBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {t('authForgot') || 'Forgot password?'}
+                </button>
+              ) : null}
+              {authMode === 'reset' ? (
+                <button
+                  type="button"
+                  className="primary boot-submit"
+                  disabled={authBusy || authPass.length < 8}
+                  onClick={() =>
+                    void (async () => {
+                      setAuthBusy(true);
+                      try {
+                        await resetPassword(resetToken, authPass);
+                        setAuthMode('login');
+                        flash(t('authResetOk') || 'Password updated');
+                      } catch {
+                        flash(t('authResetFail') || 'Reset failed');
+                      } finally {
+                        setAuthBusy(false);
+                      }
+                    })()
+                  }
+                >
+                  {t('authResetSubmit') || 'Set new password'}
+                </button>
+              ) : null}
               {awaitingVerify ? (
                 <button
                   type="button"
@@ -901,6 +975,7 @@ export function GameShell() {
             ['barracks', t('barracks')],
             ['tavern', t('tavern')],
             ['inventory', t('inventory')],
+            ['social', t('social') || 'Social'],
             ['profile', t('profileTab')],
           ] as const
         ).map(([id, label]) => (
@@ -915,7 +990,12 @@ export function GameShell() {
             <span>{player.displayName || player.email.split('@')[0]}</span>
           </div>
         ) : null}
-        <button type="button" className="ghost" onClick={() => setScreen('boot')}>
+              {player?.role === 'admin' ? (
+                <a href="/admin" className="ghost" style={{ marginLeft: '0.5rem' }}>
+                  Admin
+                </a>
+              ) : null}
+              <button type="button" className="ghost" onClick={() => setScreen('boot')}>
           {t('settings')}
         </button>
       </nav>
@@ -1049,6 +1129,9 @@ export function GameShell() {
             />
           )}
           {hubTab === 'inventory' && <InventoryView state={state} refresh={refresh} />}
+          {hubTab === 'social' && player ? (
+            <SocialPanel playerId={player.id} flash={flash} />
+          ) : null}
           {hubTab === 'profile' && player ? (
             <div>
               <div className="panel-header">

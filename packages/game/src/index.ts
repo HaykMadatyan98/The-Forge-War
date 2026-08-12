@@ -10,3 +10,4 @@ export * from './hubGuide';
 export * from './energy';
 export * from './profile';
 export * from './pvp';
+export * from './simulate';

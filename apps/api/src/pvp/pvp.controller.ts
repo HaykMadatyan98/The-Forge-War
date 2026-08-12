@@ -61,10 +61,19 @@ export class PvpController {
   @Post('result')
   async result(
     @Req() req: Request,
-    @Body() body: { matchId?: string; victory?: boolean },
+    @Body()
+    body: {
+      matchId?: string;
+      victory?: boolean;
+      deployWarriorIds?: string[];
+      deployPositions?: { x: number; y: number }[];
+    },
   ) {
     const player = await this.needPlayer(req);
     if (!body?.matchId) throw new BadRequestException('missing_match');
-    return this.pvp.recordResult(player.id, String(body.matchId), !!body.victory);
+    return this.pvp.recordResult(player.id, String(body.matchId), !!body.victory, {
+      warriorIds: body.deployWarriorIds,
+      positions: body.deployPositions,
+    });
   }
 }

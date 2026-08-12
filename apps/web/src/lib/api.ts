@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787/v1';
+import { getApiV1Url } from './apiBase';
+
+const API_URL = getApiV1Url();
 
 const TOKEN_KEY = 'tfw_auth_token';
 const SESSION_HINT = 'tfw_has_session';
@@ -9,6 +11,7 @@ export type PublicPlayer = {
   displayName: string | null;
   avatarKey: string | null;
   emailVerified?: boolean;
+  role?: string;
   createdAt?: string;
 };
 
@@ -296,11 +299,167 @@ export async function startPvpChallenge(opponentId: string) {
   };
 }
 
-export async function reportPvpResult(matchId: string, victory: boolean) {
+export async function forgotPassword(email: string) {
+  const res = await apiFetch('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'forgot_failed');
+  return data as { ok: true; message: string; devResetToken?: string };
+}
+
+export async function resetPassword(token: string, password: string) {
+  const res = await apiFetch('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'reset_failed');
+  return data as { ok: true };
+}
+
+export type FriendPlayer = {
+  id: string;
+  displayName: string | null;
+  avatarKey: string | null;
+  email: string;
+};
+
+export type PendingFriends = {
+  incoming: { id: string; player: FriendPlayer }[];
+  outgoing: { id: string; player: FriendPlayer }[];
+};
+
+export type FriendEntry = {
+  friendshipId: string;
+  player: FriendPlayer;
+};
+
+export async function fetchFriends() {
+  const res = await fetch(`${API_URL}/friends`, {
+    headers: authHeaders(false),
+    credentials: cred,
+    cache: 'no-store',
+  });
+  if (!res.ok) return { friends: [] as FriendEntry[] };
+  return res.json() as Promise<{ friends: FriendEntry[] }>;
+}
+
+export async function fetchPendingFriends() {
+  const res = await fetch(`${API_URL}/friends/pending`, {
+    headers: authHeaders(false),
+    credentials: cred,
+    cache: 'no-store',
+  });
+  if (!res.ok) return { incoming: [], outgoing: [] } as PendingFriends;
+  return res.json() as Promise<PendingFriends>;
+}
+
+export async function sendFriendRequest(playerId: string) {
+  const res = await apiFetch('/friends/request', {
+    method: 'POST',
+    body: JSON.stringify({ playerId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'friend_request_failed');
+  return data;
+}
+
+export async function acceptFriend(friendshipId: string) {
+  const res = await apiFetch(`/friends/${friendshipId}/accept`, { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'accept_failed');
+  return data;
+}
+
+export async function removeFriendByPlayer(playerId: string) {
+  const res = await apiFetch('/friends/remove', {
+    method: 'POST',
+    body: JSON.stringify({ playerId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'remove_failed');
+  return data;
+}
+
+export type ChatMessage = {
+  id: string;
+  body: string;
+  senderId: string;
+  receiverId: string;
+  readAt?: string | null;
+  createdAt: string;
+  sender?: { id: string; displayName: string | null; avatarKey: string | null };
+};
+
+export async function fetchChatThread(withPlayerId: string, limit = 50) {
+  const q = new URLSearchParams({ with: withPlayerId, limit: String(limit) });
+  const res = await fetch(`${API_URL}/chat/thread?${q}`, {
+    headers: authHeaders(false),
+    credentials: cred,
+    cache: 'no-store',
+  });
+  if (!res.ok) return { messages: [] as ChatMessage[] };
+  return res.json() as Promise<{ messages: ChatMessage[] }>;
+}
+
+export async function sendChatMessage(receiverId: string, body: string) {
+  const res = await apiFetch('/chat/send', {
+    method: 'POST',
+    body: JSON.stringify({ receiverId, body }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'chat_failed');
+  return data;
+}
+
+export async function fetchAdminStats() {
+  const res = await fetch(`${API_URL}/admin/stats`, {
+    headers: authHeaders(false),
+    credentials: cred,
+    cache: 'no-store',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'admin_denied');
+  return data as Record<string, number>;
+}
+
+export async function fetchAdminPlayers(limit = 50) {
+  const res = await fetch(`${API_URL}/admin/players?limit=${limit}`, {
+    headers: authHeaders(false),
+    credentials: cred,
+    cache: 'no-store',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'admin_denied');
+  return data as { players: (PublicPlayer & { role?: string; _count?: { sessions: number } })[] };
+}
+
+export async function setAdminRole(playerId: string, role: 'user' | 'admin') {
+  const res = await apiFetch('/admin/players/role', {
+    method: 'PATCH',
+    body: JSON.stringify({ playerId, role }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw parseError(data, 'role_failed');
+  return data;
+}
+
+export async function reportPvpResult(
+  matchId: string,
+  victory: boolean,
+  deploy?: { deployWarriorIds?: string[]; deployPositions?: { x: number; y: number }[] },
+) {
   try {
     await apiFetch('/pvp/result', {
       method: 'POST',
-      body: JSON.stringify({ matchId, victory }),
+      body: JSON.stringify({
+        matchId,
+        victory,
+        deployWarriorIds: deploy?.deployWarriorIds,
+        deployPositions: deploy?.deployPositions,
+      }),
     });
   } catch {
     /* offline */

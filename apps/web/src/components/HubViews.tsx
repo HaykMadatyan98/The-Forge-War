@@ -73,6 +73,7 @@ import {
   pvpThreatLabelKey,
 } from '@tfw/game';
 import { fetchMyPvp, fetchPvpOpponents, type PvpOpponent, type PublicPlayer } from '@/lib/api';
+import { connectRealtime, type LiveMatchedEvent } from '@/lib/realtime';
 import { IconGold, IconRes, IconSlot, IconSpark, IconWeapon, Portrait, Stars } from './icons';
 import { AccountAvatar } from './AccountAvatar';
 import { FancySelect, StatGrid, SubTabs, CostList } from './ui';
@@ -1279,6 +1280,8 @@ export function PvpView({
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<'idle' | 'queued' | 'matched'>('idle');
+  const [liveMatch, setLiveMatch] = useState<LiveMatchedEvent | null>(null);
   const myPower = extractDefenseSquad(state).power || 0;
   const defenseStale =
     !!mine && Math.abs((mine.power || 0) - myPower) >= 8;
@@ -1300,6 +1303,34 @@ export function PvpView({
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player?.id]);
+
+  useEffect(() => {
+    if (!player) return;
+    const sock = connectRealtime();
+    const onMatched = (ev: LiveMatchedEvent) => {
+      setLiveStatus('matched');
+      setLiveMatch(ev);
+      flash(t('livePvpMatched') || 'Live match found!');
+    };
+    sock.on('live:matched', onMatched);
+    return () => {
+      sock.off('live:matched', onMatched);
+    };
+  }, [player, flash]);
+
+  function joinLiveQueue() {
+    if (!player) return;
+    const sock = connectRealtime();
+    setLiveStatus('queued');
+    sock.emit('live:queue', {}, (res: { status?: string; error?: string }) => {
+      if (res?.error) {
+        setLiveStatus('idle');
+        flash(t('livePvpFail') || 'Queue failed');
+      } else if (res?.status === 'queued') {
+        flash(t('livePvpQueued') || 'Searching opponent…');
+      }
+    });
+  }
 
   async function postDefense() {
     setPosting(true);
@@ -1356,6 +1387,41 @@ export function PvpView({
           ) : null}
         </div>
       </div>
+
+      {player ? (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <h3>{t('livePvp') || 'Live PvP'}</h3>
+          <p className="muted">{t('livePvpHint') || 'Real-time matchmaking via WebSocket'}</p>
+          {liveMatch ? (
+            <p>
+              {t('livePvpOpponent') || 'Opponent'}: <b>{liveMatch.opponentId.slice(0, 8)}…</b>
+            </p>
+          ) : null}
+          <div className="row" style={{ gap: '0.5rem', marginTop: '0.5rem' }}>
+            <button
+              type="button"
+              className="primary"
+              disabled={liveStatus === 'queued'}
+              onClick={joinLiveQueue}
+            >
+              {liveStatus === 'queued' ? t('livePvpSearching') || 'Searching…' : t('livePvpJoin') || 'Find match'}
+            </button>
+            {liveStatus !== 'idle' ? (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  connectRealtime().emit('live:leave');
+                  setLiveStatus('idle');
+                  setLiveMatch(null);
+                }}
+              >
+                {t('cancel') || 'Cancel'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {player ? (
         <div

@@ -2049,3 +2049,67 @@ h3 {
     min-height: 50vh;
   }
 }
+
+.social-panel .social-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: 1rem;
+  min-height: 320px;
+}
+
+.social-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.social-friend {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border, #333);
+  background: var(--panel, #141810);
+  text-align: left;
+  cursor: pointer;
+}
+
+.social-friend.active {
+  border-color: var(--accent2, #c9a227);
+}
+
+.social-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
+.social-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 240px;
+  margin-top: 0.5rem;
+}
+
+.social-msg {
+  align-self: flex-start;
+  max-width: 85%;
+  padding: 0.4rem 0.65rem;
+  border-radius: 10px;
+  background: #1e2418;
+}
+
+.social-msg.mine {
+  align-self: flex-end;
+  background: #2a3418;
+}
+
+@media (max-width: 720px) {
+  .social-panel .social-grid {
+    grid-template-columns: 1fr;
+  }
+}

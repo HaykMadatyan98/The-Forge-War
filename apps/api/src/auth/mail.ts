@@ -94,3 +94,21 @@ export async function sendVerificationEmail(to: string, rawToken: string): Promi
     console.error(`[mail] mail not configured — cannot send to ${to}`);
   }
 }
+
+export async function sendPasswordResetEmail(to: string, rawToken: string): Promise<void> {
+  const link = `${webPublicOrigin()}/?resetPassword=${encodeURIComponent(rawToken)}`;
+  const subject = 'The Forge War — reset your password';
+  const text = `Reset your password:\n\n${link}\n\nIf you did not request this, ignore this message.`;
+  const html = `<p>Reset your password:</p><p><a href="${link}">${link}</a></p><p>If you did not request this, ignore this message.</p>`;
+
+  if (await sendViaResend(to, subject, text, html)) return;
+  if (await sendViaSmtp(to, subject, text, html)) return;
+
+  if (process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    console.log(`[mail:dev] reset → ${to}\n${link}`);
+  } else {
+    // eslint-disable-next-line no-console
+    console.error(`[mail] mail not configured — cannot send to ${to}`);
+  }
+}

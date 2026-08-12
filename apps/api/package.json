@@ -11,14 +11,19 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.7",
     "@nestjs/core": "^11.0.7",
     "@nestjs/platform-express": "^11.0.7",
+    "@nestjs/platform-socket.io": "^11.0.7",
+    "@nestjs/websockets": "^11.0.7",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "@tfw/game": "*",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -29,7 +34,8 @@
     "prisma": "^7.9.1",
     "reflect-metadata": "^0.2.2",
     "resend": "^6.19.0",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
@@ -39,6 +45,7 @@
     "@types/node": "^22.10.7",
     "@types/nodemailer": "^6.4.17",
     "@types/pg": "^8.15.4",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
   }
 }

@@ -14,6 +14,7 @@
     "db:push": "npm run db:push -w @tfw/api",
     "db:migrate": "npm run db:migrate -w @tfw/api",
     "build": "npm run build -w @tfw/game && npm run build -w @tfw/api && npm run build -w @tfw/web",
+    "test": "npm run test -w @tfw/game && npm run test -w @tfw/api",
     "start:web": "npm run start -w @tfw/web",
     "start:api": "npm run start -w @tfw/api",
     "db:bootstrap": "bash scripts/db-bootstrap.sh",

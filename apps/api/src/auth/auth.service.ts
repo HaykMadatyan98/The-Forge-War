@@ -13,6 +13,7 @@ import { allowDevEmailToken, sendVerificationEmail } from './mail';
 
 const SESSION_DAYS = 14;
 const VERIFY_HOURS = 48;
+const RESET_HOURS = 2;
 const PASSWORD_MIN = 8;
 
 export type PublicPlayer = {
@@ -21,6 +22,7 @@ export type PublicPlayer = {
   displayName: string | null;
   avatarKey: string | null;
   emailVerified: boolean;
+  role: string;
   createdAt: Date;
 };
 
@@ -38,6 +40,7 @@ export class AuthService {
     displayName: string | null;
     avatarKey?: string | null;
     emailVerified?: boolean;
+    role?: string;
     createdAt: Date;
   }): PublicPlayer {
     return {
@@ -46,8 +49,18 @@ export class AuthService {
       displayName: p.displayName,
       avatarKey: p.avatarKey ?? null,
       emailVerified: !!p.emailVerified,
+      role: p.role || 'user',
       createdAt: p.createdAt,
     };
+  }
+
+  isAdmin(p: { role?: string; email?: string }) {
+    if (p.role === 'admin') return true;
+    const list = (process.env.ADMIN_EMAILS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    return !!(p.email && list.includes(p.email.toLowerCase()));
   }
 
   private normalizeDisplayName(raw?: string) {
@@ -207,6 +220,60 @@ export class AuthService {
     const out: Record<string, unknown> = { ok: true, message: 'if_registered_check_email' };
     if (allowDevEmailToken()) out.devVerifyToken = raw;
     return out;
+  }
+
+  private async createPasswordResetToken(playerId: string) {
+    await this.prisma.passwordResetToken.deleteMany({ where: { playerId } });
+    const raw = randomBytes(32).toString('base64url');
+    const tokenHash = this.hashToken(raw);
+    const expiresAt = new Date(Date.now() + RESET_HOURS * 60 * 60 * 1000);
+    await this.prisma.passwordResetToken.create({
+      data: { playerId, tokenHash, expiresAt },
+    });
+    return raw;
+  }
+
+  async requestPasswordReset(body: { email?: string }) {
+    const email = this.normalizeEmail(body.email || '');
+    if (!email) throw new BadRequestException('invalid_email');
+    const player = await this.prisma.player.findUnique({ where: { email } });
+    if (player?.passwordHash && player.emailVerified) {
+      const raw = await this.createPasswordResetToken(player.id);
+      const { sendPasswordResetEmail } = await import('./mail');
+      await sendPasswordResetEmail(player.email, raw);
+      const out: Record<string, unknown> = { ok: true, message: 'if_registered_check_email' };
+      if (allowDevEmailToken()) out.devResetToken = raw;
+      return out;
+    }
+    return { ok: true, message: 'if_registered_check_email' };
+  }
+
+  async resetPassword(body: { token?: string; password?: string }) {
+    const raw = String(body.token || '').trim();
+    const password = String(body.password || '');
+    if (!raw) throw new BadRequestException('missing_token');
+    if (password.length < PASSWORD_MIN) throw new BadRequestException('password_min_8');
+
+    const tokenHash = this.hashToken(raw);
+    const row = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { player: true },
+    });
+    if (!row) throw new BadRequestException('invalid_token');
+    if (row.expiresAt.getTime() < Date.now()) {
+      await this.prisma.passwordResetToken.delete({ where: { id: row.id } }).catch(() => {});
+      throw new BadRequestException('token_expired');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    await this.prisma.player.update({
+      where: { id: row.playerId },
+      data: { passwordHash },
+    });
+    await this.prisma.passwordResetToken.deleteMany({ where: { playerId: row.playerId } });
+    await this.prisma.session.deleteMany({ where: { playerId: row.playerId } });
+
+    return { ok: true };
   }
 
   oauthConfig() {

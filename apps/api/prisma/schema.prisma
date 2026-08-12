@@ -1,4 +1,4 @@
-// The Forge War — players, sessions, cloud saves, PvP (PostgreSQL / Prisma 7)
+// The Forge War — players, sessions, cloud saves, PvP, social (PostgreSQL / Prisma 7)
 
 generator client {
   provider = "prisma-client"
@@ -11,28 +11,35 @@ datasource db {
 
 /// Registered player (email+password and/or Google/Apple OAuth).
 model Player {
-  id            String             @id @default(cuid())
-  email         String             @unique
+  id            String               @id @default(cuid())
+  email         String               @unique
   /// Null for OAuth-only accounts
   passwordHash  String?
   /// Password signups start false; OAuth with verified email is true
-  emailVerified Boolean            @default(false)
+  emailVerified Boolean              @default(false)
+  /// user | admin
+  role          String               @default("user")
   /// Public nickname
   displayName   String?
   /// Curated avatar p0–p4 or data-URL custom image
   avatarKey     String?
   /// Google `sub` claim
-  googleSub     String?            @unique
+  googleSub     String?              @unique
   /// Apple `sub` claim
-  appleSub      String?            @unique
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  appleSub      String?              @unique
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
   sessions      Session[]
   save          GameSave?
   pvpDefense    PvpDefense?
   emailTokens   EmailVerifyToken[]
-  pvpAttacked   PvpMatch[]         @relation("PvpAttacker")
-  pvpDefended   PvpMatch[]         @relation("PvpDefender")
+  passwordReset PasswordResetToken[]
+  pvpAttacked   PvpMatch[]           @relation("PvpAttacker")
+  pvpDefended   PvpMatch[]           @relation("PvpDefender")
+  friendsSent   Friendship[]         @relation("FriendRequester")
+  friendsRecv   Friendship[]         @relation("FriendAddressee")
+  messagesSent  ChatMessage[]        @relation("MessageSender")
+  messagesRecv  ChatMessage[]        @relation("MessageReceiver")
 }
 
 /// Opaque bearer session (raw token only returned at issue time).
@@ -49,6 +56,18 @@ model Session {
 
 /// One-time email verification token (hash only stored).
 model EmailVerifyToken {
+  id        String   @id @default(cuid())
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([playerId])
+}
+
+/// One-time password reset token (hash only stored).
+model PasswordResetToken {
   id        String   @id @default(cuid())
   playerId  String
   player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
@@ -105,4 +124,36 @@ model PvpMatch {
   @@index([attackerId, createdAt])
   @@index([defenderId, createdAt])
   @@index([status, expiresAt])
+}
+
+/// Friend request / accepted friendship (ordered pair uniqueness).
+model Friendship {
+  id          String   @id @default(cuid())
+  requesterId String
+  requester   Player   @relation("FriendRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addresseeId String
+  addressee   Player   @relation("FriendAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+  /// pending | accepted | blocked
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+  @@index([requesterId, status])
+}
+
+/// Direct messages between friends.
+model ChatMessage {
+  id         String    @id @default(cuid())
+  senderId   String
+  sender     Player    @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId String
+  receiver   Player    @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  body       String    @db.VarChar(2000)
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([receiverId, createdAt])
+  @@index([senderId, receiverId, createdAt])
 }

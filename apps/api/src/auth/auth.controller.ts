@@ -72,6 +72,16 @@ export class AuthController {
     return this.auth.resendVerification(body);
   }
 
+  @Post('forgot-password')
+  forgotPassword(@Body() body: { email?: string }) {
+    return this.auth.requestPasswordReset(body);
+  }
+
+  @Post('reset-password')
+  resetPassword(@Body() body: { token?: string; password?: string }) {
+    return this.auth.resetPassword(body);
+  }
+
   @Get('oauth-config')
   oauthConfig() {
     return this.auth.oauthConfig();
